@@ -51,6 +51,9 @@ test("two builds exact, MANIFEST path set exact and self excluded; release refus
   const a = build("foundation", false),
     b = build("foundation", false);
   assert.deepEqual(a, b);
+  assert.deepEqual(a.subarray(4, 8), Buffer.alloc(4), "gzip timestamp fixed");
+  assert.equal(a[3], 0, "gzip has no filename or optional platform metadata");
+  assert.equal(a[9], 255, "gzip OS marker identical across runners");
   const files = unpack(a, "trajecta-0.5.0");
   verifyManifest(files);
   const m = JSON.parse(files["MANIFEST.json"].toString());

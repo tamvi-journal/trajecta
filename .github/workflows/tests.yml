@@ -29,3 +29,18 @@ jobs:
         with:
           name: foundation-${{ matrix.os }}-node${{ matrix.node }}
           path: dist/
+  deterministic:
+    name: Byte-identical artifacts across six combinations
+    needs: foundation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: foundation-*
+          path: .isolation/matrix
+      - name: Compare every artifact byte across the matrix
+        run: node --experimental-strip-types tools/compare-builds.ts .isolation/matrix

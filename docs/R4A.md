@@ -42,7 +42,9 @@ preserving the engine lookup. Runtime engine copies are generated and ignored by
 Git; the lock and exact commits are the reviewable source.
 
 The tarball uses sorted ustar entries, zero mtime/uid/gid, 0644/0755 modes and gzip
-with no time or filename. MANIFEST authenticates the exact payload inventory and
+with no time or filename and a fixed unknown-OS marker (255). CI requires identical
+archive bytes across all six OS/runtime combinations as well as both local builds.
+MANIFEST authenticates the exact payload inventory and
 omits itself. Foundation has no bin/ or publication sequence. Release mode
 refuses unless all four native wrapper files exist and are non-empty regular files.
 Wrappers and full release acceptance belong to 4c; publication sequence to 4d.

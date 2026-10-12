@@ -28,8 +28,11 @@ export function tarball(files: Record<string, Buffer>, top: string): Buffer {
     chunks.push(header, bytes, Buffer.alloc((512 - (bytes.length % 512)) % 512));
   }
   chunks.push(Buffer.alloc(1024));
-  // gzipSync emits a zero timestamp and no filename: gzip -n semantics.
-  return gzipSync(Buffer.concat(chunks), { level: 9 });
+  // gzip -n semantics, plus a portable OS marker. zlib otherwise writes Darwin,
+  // Unix or NTFS here, despite byte-identical tar and deflate streams.
+  const compressed = gzipSync(Buffer.concat(chunks), { level: 9 });
+  compressed[9] = 255; // RFC 1952: unknown OS; not part of the deflate payload or CRC.
+  return compressed;
 }
 /** Test/build verification only; the pre-inspecting installer extractor belongs to 4b. */
 export function unpack(bytes: Buffer, top: string): Record<string, Buffer> {
