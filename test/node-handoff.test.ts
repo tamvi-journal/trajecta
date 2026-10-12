@@ -54,6 +54,7 @@ test("a selected different runtime takes ownership only after read-only handoff"
     const owner = JSON.parse(fs.readFileSync(join(root, ".lock"), "utf8")),
       writer = JSON.parse(fs.readFileSync(marker, "utf8"));
     assert.equal(owner.pid, writer.pid);
+    assert.equal(child.exitCode, null, "the pre-lock handoff waiter stays alive while its owner is paused");
     if (process.platform !== "win32") assert.equal(writer.pid, child.pid, "POSIX exec preserves PID");
     assert.equal(fs.readFileSync(join(root, "0.5.0/node"), "utf8"), fs.realpathSync.native(other) + "\n");
     fs.writeFileSync(resume, "continue");

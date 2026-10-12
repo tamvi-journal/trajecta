@@ -30,7 +30,7 @@ export function isolatedEnv(root: string): Record<string, string> {
     TEMP: TEMP,
     TMP: TEMP,
   };
-  for (const key of ["SYSTEMROOT", "COMSPEC"]) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ["SYSTEMROOT", "COMSPEC", "PATHEXT"]) if (process.env[key]) env[key] = process.env[key]!;
   return env;
 }
 export function tree(root: string): Record<string, string> {
