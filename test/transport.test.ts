@@ -13,7 +13,14 @@ function receiptFixture(root: string): string[] {
   return JSON.parse(fs.readFileSync(join(corpus, "argv.json"), "utf8"));
 }
 const quote = (text: string) => "'" + text.replaceAll("'", "'\\''") + "'";
-async function pty(root: string, env: Record<string, string>, args: string[], input: Buffer, marker?: string) {
+async function pty(
+  root: string,
+  env: Record<string, string>,
+  args: string[],
+  input: Buffer,
+  marker: string,
+  completed: string,
+) {
   const command = [process.execPath, ...flags, ...args].map(quote).join(" ");
   const script =
     process.platform === "darwin"
@@ -27,14 +34,19 @@ async function pty(root: string, env: Record<string, string>, args: string[], in
   const stdout: Buffer[] = [],
     stderr: Buffer[] = [];
   let sent = false;
+  let ended = false;
   let timedOut = false;
   child.stdout.on("data", (bytes) => {
     stdout.push(Buffer.from(bytes));
-    if (!sent && (!marker || Buffer.concat(stdout).includes(Buffer.from(marker)))) {
+    const output = Buffer.concat(stdout);
+    if (!sent && output.includes(Buffer.from(marker))) {
       sent = true;
       child.stdin.write(input);
-      // BSD script needs terminal EOF after Ctrl-C as well as pipe EOF.
-      if (input.includes(3)) child.stdin.write(Buffer.from([4]));
+    }
+    if (sent && !ended && output.includes(Buffer.from(completed))) {
+      // BSD script injects terminal EOF when its input pipe closes. Keep that
+      // EOF after the observed result, never racing the confirmation bytes.
+      ended = true;
       child.stdin.end();
     }
   });
@@ -50,6 +62,7 @@ async function pty(root: string, env: Record<string, string>, args: string[], in
     });
     assert(!timedOut, "PTY exited without forced cleanup");
     assert(sent, "PTY confirmation boundary reached");
+    assert(ended, "PTY result observed before closing input");
     return { code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) };
   } finally {
     clearTimeout(timer);
@@ -111,7 +124,14 @@ test("real script(1) PTY: accepted and mistyped authority confirmations", async 
       const corpus = join(ROOT, ".isolation/upstream/identity/spec/golden-cli-v1/authority-retract-issue-only");
       const input = accepted ? fs.readFileSync(join(corpus, "stdin")) : Buffer.from("MISTYPED\n");
       const args = product ? [CLI, "identity", ...argv] : [enginePath("identity"), ...argv];
-      const result = await pty(root, env, args, input, "to issue the owner receipt: ");
+      const result = await pty(
+        root,
+        env,
+        args,
+        input,
+        "to issue the owner receipt: ",
+        accepted ? '"receipt_id": "receipt:' : "ConfirmationMismatch:",
+      );
       if (accepted) assert.match(result.stdout.toString(), /"receipt_id": "receipt:/u);
       else assert.match(result.stdout.toString(), /ConfirmationMismatch:/u);
       if (process.platform === "linux") assert.equal(result.code, accepted ? 0 : 1);
@@ -128,10 +148,10 @@ test("real script(1) PTY: isatty preserved and Ctrl-C reaches child", async (t) 
     env.NODE_OPTIONS = "--import=" + pathToFileURL(join(ROOT, "test/transport-probe.ts")).href;
     env.TEST_TRANSPORT_PROBE = "metadata";
     const args = product ? [CLI, "identity"] : [enginePath("identity")];
-    const result = await pty(root, env, args, Buffer.from([4]), ""); // PTY EOF, no synthetic TTY seam.
+    const result = await pty(root, env, args, Buffer.from([4]), '"tty":', '"tty":'); // Real PTY, no TTY seam.
     assert.match(result.stdout.toString(), /"tty":\[true,true,true\]/u);
     env.TEST_TRANSPORT_PROBE = "signal";
-    const interrupted = await pty(root, env, args, Buffer.from([3]), "probe ready");
+    const interrupted = await pty(root, env, args, Buffer.from([3]), "probe ready", "probe SIGINT");
     assert.match(interrupted.stdout.toString(), /probe SIGINT/u);
     if (process.platform === "linux") assert.equal(interrupted.code, 130);
   }
