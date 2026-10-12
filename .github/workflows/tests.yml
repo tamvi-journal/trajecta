@@ -1,15 +1,15 @@
-name: Foundation M2
+name: Foundation M2 and Installer M3
 on:
   push:
-    branches: [main, feat/r4a-foundation]
+    branches: [main, feat/r4a-foundation, feat/r4b-installer]
   pull_request:
 permissions:
   contents: read
 jobs:
   foundation:
-    name: M2 (${{ matrix.os }}, Node ${{ matrix.node }})
+    name: M2 + M3 (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -19,10 +19,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
+          node-version: ${{ matrix.node == 22 && 24 || 22 }}
+      - name: Record alternate supported runtime for the real handoff gate
+        id: alternate
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'path=' + process.execPath + '\n')"
+      - uses: actions/setup-node@v4
+        with:
           node-version: ${{ matrix.node }}
       - name: Pin checkout byte policy
         run: git config core.autocrlf false
       - name: Run complete foundation gates in isolated roots
+        env:
+          TEST_OTHER_NODE: ${{ steps.alternate.outputs.path }}
         run: node --experimental-strip-types test/run.ts --fetch
       - name: Exact-head evidence
         uses: actions/upload-artifact@v4

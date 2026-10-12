@@ -2,11 +2,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT } from "./engine-lock.ts";
+import { createHash } from "node:crypto";
 const compact = (source: string) => source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "").replace(/\s+/gu, "");
 export function scanDispatcher(cli: string, adapter: string): void {
   const fail = () => {
     throw new Error("observable engine dispatcher or product error wrapper");
   };
+  const verifier = /export function recoveryVerifierSource\([^]*?\n\}/u.exec(adapter)?.[0];
+  const bootstrap = /export function bootstrapEntrySource\([^]*?\n\}\s*$/u.exec(adapter)?.[0];
+  const dependencySource = adapter.replace(verifier ?? "", "").replace(bootstrap ?? "", "");
   const pass = /export async function passThrough\([^]*?\n\}/u.exec(adapter)?.[0];
   if (
     compact(pass ?? "") !==
@@ -55,7 +59,10 @@ export function scanDispatcher(cli: string, adapter: string): void {
         'import { engineMetadata, passThrough } from "./engines.ts";',
       ],
     ],
-    [adapter, ['import { readFileSync } from "node:fs";', 'import { fileURLToPath, pathToFileURL } from "node:url";']],
+    [
+      dependencySource,
+      ['import { readFileSync } from "node:fs";', 'import { fileURLToPath, pathToFileURL } from "node:url";'],
+    ],
   ] as const) {
     const found = source.match(/^import[^\n]+/gmu) ?? [];
     if (JSON.stringify(found.map(compact)) !== JSON.stringify(imports.map(compact))) fail();
@@ -67,11 +74,33 @@ export function scanDispatcher(cli: string, adapter: string): void {
     .replace(/export async function main[^]*?\n\}/u, "");
   if (compact(beforeEntry)) fail();
   const residue = adapter
+    .replace(verifier ?? "", "")
+    .replace(bootstrap ?? "", "")
     .replace(/^import[^\n]+/gmu, "")
     .replace(/export (?:async )?function [^]*?\n\}/gu, "")
     .replace(/export type Engine[^;]+;/u, "");
   if (compact(residue)) fail();
-  const outsidePass = compact(adapter.replace(pass!, ""));
+  // This pure string factory is never reached by engine dispatch. Pin its complete
+  // source separately; mutation or an added effect fails, rather than broadening
+  // the forbidden-process rule for other adapter functions.
+  if (
+    verifier &&
+    createHash("sha256").update(verifier).digest("hex") !==
+      "79ce25c6351f2495060aba1e490ed8b1ea342fa393834a1a8b21a3ba17accda6"
+  )
+    fail();
+  if (
+    bootstrap &&
+    createHash("sha256").update(bootstrap).digest("hex") !==
+      "072849eaf7c03b05f031ddf63602c41e3f3bfc29682b290afb218c4e6b0634f6"
+  )
+    fail();
+  const outsidePass = compact(
+    adapter
+      .replace(pass!, "")
+      .replace(verifier ?? "", "")
+      .replace(bootstrap ?? "", ""),
+  );
   if (/\bprocess\b|child_process|\b(?:spawn|exec|eval|Function|require)\s*\(/u.test(outsidePass)) fail();
 }
 export function checkDispatcher(): void {

@@ -20,6 +20,21 @@ run([
   "test/compat.test.ts",
   "test/write-trace.test.ts",
 ]);
+run([
+  "--test",
+  "--test-concurrency=1",
+  "test/install-lock.test.ts",
+  "test/lock-concurrency.test.ts",
+  "test/release-trust.test.ts",
+  "test/recovery.test.ts",
+  "test/writer-lifetime.test.ts",
+  "test/install-transaction.test.ts",
+  "test/installer-adversarial.test.ts",
+  "test/node-handoff.test.ts",
+  "test/install-authority.test.ts",
+  "test/bootstrap.test.ts",
+  "test/extractor.test.ts",
+]);
 run(["--test", ".isolation/cli-conformance.test.ts"]);
 const work = join(ROOT, ".isolation/upstream/work");
 const tests = readdirSync(join(work, "test"))

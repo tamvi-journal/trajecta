@@ -3,7 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 if (process.env.TEST_WRITE_TRACE) {
   Error.stackTraceLimit = 100; // Recursive native fs helpers must retain the engine caller in the audit stack.
   const append = fs.appendFileSync,
@@ -24,12 +24,28 @@ if (process.env.TEST_WRITE_TRACE) {
     while (!fs.existsSync(ancestor) && dirname(ancestor) !== ancestor) ancestor = dirname(ancestor);
     path = resolve(realpath(ancestor), relative(ancestor, path));
     const stack = new Error().stack ?? "";
-    const mediated = stack.includes(engineRoot) || stack.includes(new URL("../engines/", import.meta.url).href);
+    const installRoot = process.env.TEST_INSTALL_ROOT;
+    const stagedEngine =
+      !!installRoot &&
+      (stack.includes(installRoot) || stack.includes(pathToFileURL(installRoot).href)) &&
+      /\/engines\/(?:identity|work)\/src\//u.test(stack);
+    const mediated =
+      stack.includes(engineRoot) || stack.includes(new URL("../engines/", import.meta.url).href) || stagedEngine;
     const contained = allowed.some((root) => {
       const part = relative(resolve(root), path);
       return !isAbsolute(part) && part !== ".." && !part.startsWith("../") && !part.startsWith("..\\");
     });
-    const accepted = mediated && contained;
+    const underInstall =
+      !!installRoot &&
+      (path === resolve(installRoot) ||
+        path.startsWith(resolve(installRoot) + "/") ||
+        path.startsWith(resolve(installRoot) + "\\"));
+    const lockCode = /install-lock\.ts/u.test(stack);
+    const installOwner =
+      installRoot && fs.existsSync(resolve(installRoot, ".lock"))
+        ? JSON.parse(fs.readFileSync(resolve(installRoot, ".lock"), "utf8")).pid
+        : undefined;
+    const accepted = underInstall ? lockCode || installOwner === process.pid : mediated && contained;
     recording = true;
     try {
       append(
@@ -41,6 +57,7 @@ if (process.env.TEST_WRITE_TRACE) {
           path,
           mediated,
           accepted,
+          installOwner,
         }) + "\n",
       );
     } finally {

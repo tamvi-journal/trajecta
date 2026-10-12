@@ -43,6 +43,24 @@ export function build(mode: "foundation" | "release" = "foundation", fetch = tru
   verifyManifest(unpack(bytes, `trajecta-${pkg.version}`));
   return bytes;
 }
+/** Unsigned metadata only. Signing and release publication remain separately authorized. */
+export function releaseMetadata(bytes: Buffer, version: string) {
+  const files = unpack(bytes, `trajecta-${version}`);
+  verifyManifest(files);
+  const manifestBytes = files["MANIFEST.json"];
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const extractor = files["product/trajecta-extract.mjs"];
+  if (!extractor) throw new Error("release requires extractor");
+  if (manifest.version !== version) throw new Error("release version mismatch");
+  return {
+    version,
+    size: bytes.length,
+    sha256: sha(bytes),
+    engines: manifest.engines,
+    extractor_sha256: sha(extractor),
+    manifest_sha256: sha(manifestBytes),
+  };
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
   const mode = args.includes("--release") ? "release" : "foundation";
@@ -52,5 +70,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const bytes = build(mode, !args.includes("--cached"));
   fs.mkdirSync(dirname(out), { recursive: true });
   fs.writeFileSync(out, bytes);
-  process.stdout.write(json({ path: out, size: bytes.length, sha256: sha(bytes), artifact: mode }));
+  process.stdout.write(json({ path: out, ...releaseMetadata(bytes, pkg.version), artifact: mode }));
 }
