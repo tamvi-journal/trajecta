@@ -94,24 +94,7 @@ test("real Windows bootstrap with empty production anchor changes nothing", (t) 
       { cwd: ROOT, env, encoding: "utf8" },
     );
   assert.equal(r.status, 1);
-  const probe = spawnSync(
-    "powershell.exe",
-    ["-NoProfile", "-Command", `$ErrorActionPreference='Stop'
-$candidate='${process.execPath.replaceAll("'", "''")}'
-try {
-  $version = (& $candidate --version 2>$null).Trim()
-  $code=$LASTEXITCODE
-  $match=$version -match '^v?(22|24)\\.(\\d+)\\.\\d+$'
-  @{version=$version;code=$code;match=$match;major=$Matches[1];minor=$Matches[2]} | ConvertTo-Json -Compress
-} catch { [Console]::Error.WriteLine($_.Exception.ToString()); exit 1 }`],
-    { cwd: ROOT, env, encoding: "utf8" },
-  );
-  const native = spawnSync(process.execPath, ["--version"], { env, encoding: "utf8" });
-  const psNative = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-    `& '${process.execPath.replaceAll("'", "''")}' --version; Write-Output ('native-exit='+$LASTEXITCODE); Write-Output ('exists='+[IO.File]::Exists('${process.execPath.replaceAll("'", "''")}'))`
-  ], { env, encoding: "utf8" });
-  assert.equal(r.stderr, "trajecta: no trusted release key configured\n",
-    JSON.stringify({ stderr: r.stderr, probe, native, psNative }));
+  assert.equal(r.stderr, "trajecta: no trusted release key configured\n");
   assert.deepEqual(tree(f.root), before);
 });
 
