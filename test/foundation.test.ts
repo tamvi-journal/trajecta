@@ -82,8 +82,10 @@ test("lint and independent scan reject engine/sqlite bypasses including dynamic 
     "const db = await import(moduleName);",
     'const db = await import("node:" + "sqlite");',
   ]) {
-    assert.throws(() => lintSource("product/src/bypass.ts", source), /authority/);
-    assert.throws(() => sourceScan("product/src/bypass.ts", source), /authority/);
+    for (const file of ["product/src/bypass.ts", "tools/authority-lint.ts"]) {
+      assert.throws(() => lintSource(file, source), /authority/);
+      assert.throws(() => sourceScan(file, source), /authority/);
+    }
   }
 });
 test("default example works offline without profile env; external cwd and no Git/npm executable", () => {

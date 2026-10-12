@@ -15,10 +15,14 @@ export function lintSource(file: string, source: string): void {
 }
 export function sourceScan(file: string, source: string): void {
   if (file === "product/src/engines.ts") return;
-  const statements = source.match(/(?:\bimport|\bexport|\brequire)[^;]*[;\n]/gu) ?? [];
+  // Statement boundaries keep this scanner's regex literals from masquerading
+  // as imports. The rule implementation itself receives the same checks.
+  const statements = source.match(/(?:^|[;\n])\s*(?:import|export)\b[^;]*(?:;|$)/gu) ?? [];
   for (const statement of statements)
     if (statement.includes("node:sqlite") || /["'`][^"'\n]*\/engines\//u.test(statement))
       throw new Error(`authority source scan: ${file}`);
+  if (/\b(?:import|require)\s*\(\s*["'](?:node:sqlite|[^"']*\/engines\/)/u.test(source))
+    throw new Error(`dynamic authority source scan: ${file}`);
   if (/\b(?:eval|Function)\s*\(/u.test(source)) throw new Error(`dynamic code in production: ${file}`);
   if (
     /\b(?:import|require)\s*\(\s*(?!["'])/u.test(source) ||
@@ -32,10 +36,7 @@ export function checkAuthority(): void {
       if (name.endsWith(".ts")) {
         const file = root + "/" + name,
           source = bytes.toString("utf8");
-        // The rule implementation contains adversarial syntax as data.
-        if (file !== "tools/authority-lint.ts") {
-          lintSource(file, source);
-          sourceScan(file, source);
-        }
+        lintSource(file, source);
+        sourceScan(file, source);
       }
 }
