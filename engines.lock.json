@@ -1,0 +1,111 @@
+{
+  "schema": "trajecta.engines-lock/v1",
+  "engines": {
+    "identity": {
+      "repository": "https://github.com/tamvi-journal/trajecta-identity-memory.git",
+      "commit": "98313ac335a533732630b2ba7039180e4bb89dcf",
+      "subdirectory": "node",
+      "paths": [
+        "src",
+        "schema.sql",
+        "tables",
+        "assets",
+        "package.json"
+      ],
+      "files": {
+        "assets/view.html": "e2d77258d70875102717490ad76390ee29010146becd45824202d21c5323d913",
+        "package.json": "7c02278d3c0bc085db7327e8cbd79d0521adb555f1894fe89b068a5efa58a55b",
+        "schema.sql": "a8f283d76ad0966ab82f395583e30849a007814e67eae554e3d967a75918c10c",
+        "src/activation.ts": "b043a5725fd21dba4f15fcc1694967cd26d340b33129114b9901ea44ff9672f9",
+        "src/authority.ts": "57d2d35d7cde6552de728297b95932db40accdb0d3ea4d984c0f785195b6d892",
+        "src/backup-time.ts": "f194d6e38364a37708d2e999c0af626d5a506d12b0551e35a18aa093e280e62e",
+        "src/cli-decode.ts": "f60454fd103d36077b5be4aa33b11d94bad579b91f71fadefa9c44aedb7876fa",
+        "src/cli-runtime.ts": "398af5fc60b7cd402b11523bf897c7a9bafcb36c93ab8269cab608a0e672db11",
+        "src/cli-tables.ts": "60b507d363d50bfb86613122d185860130ca376f0435705bb7bea603390fcbb0",
+        "src/cli.ts": "31232b259050a7448dfc6ef2a8f600308fe23ceafaac969bb9c3979111934dcf",
+        "src/clock.ts": "8d5cfae2dd337f59fa8f2b66e20b963ad1846827cab73bff1b7d9778ee3f56f7",
+        "src/doctor.ts": "0870f9cf2a81036ffe3f919a547602c615c740c836e0238aa3b22bad9a951bab",
+        "src/encoding.ts": "9b9fdf27fbc5d962a014ec6d2b80253964774ac6f268ea69d05542eb9ff0b3cc",
+        "src/errors.ts": "0d2e4c732f3de2d24b1fd04e216f74316588c3f59835c91b9017a9cd29ea5da9",
+        "src/evidence-identity.ts": "5f40fe0cfb5707d10f0977354947755833b62bc3dadebc23a18fe67721bdc503",
+        "src/governance.ts": "1892fc84c33708f0c4d12537b47ba126d97b5700d73a3c371bc220c29ee1e2f7",
+        "src/identity.ts": "be27c04693b0344b3a4e42cd7ed60f91648df56a054a93ab05416910971d0d08",
+        "src/index.ts": "bbb7cdc1bec07c29674dbd0e860c023f1fc0ff9197cf4170866f92fb69bb691b",
+        "src/internal-hooks.ts": "2035b0ad7cc39b08043df3b506691ad1d7b0b377237bde92ab04984b51625f32",
+        "src/json.ts": "5219f2765e3ab108a3f0f018879ef564e19e7cd8ea1cce342044c6b7ffae5415",
+        "src/kernel.ts": "89eee5ab2363081e89199eb1abb79b5e7858d36b33702fb260943a0fe0ca835c",
+        "src/mcp-schema.ts": "8a476c0a8402406ed87a79f1a44f4b3d324227f6fb2363f3c02bf42941afff6c",
+        "src/mcp.ts": "ff6fe05711f8ea35143767f853b5dc92e09c7edec30797714670e36acb7a8189",
+        "src/packet.ts": "3ed9bb30aec35dfda32f42f63917106d47d479a37fec64736e1cbb96da6a7f4e",
+        "src/paths.ts": "2b5bbdca76c759ced978a2ef603a231d7dfec23eeb03e611295e5670eb1b9ec8",
+        "src/profile.ts": "dd38b4ea0cd0e500388d11a8da420499587e031b3a7ac131225a58f6fecaf8a0",
+        "src/recipe.ts": "e1f314396c0b5224c2659f7c19a1baadaf1f4d643fdc6ca49e97e412c44bbf33",
+        "src/retrieval.ts": "ec2b6da29ba28aff1d07b789fd93b507e7401d41f5ec77acc1cb7e44709e98fc",
+        "src/sqlite-errors.ts": "aa0994f2f0b0b98483c057afd5262e9feca6f833e1b9e5b9c55ed2064c0be3ad",
+        "src/sqlite-warning.ts": "5ecd3f5892e1b6ddfc30e7c60f942e82a69a1b8c91cda98fca443ee5641d5935",
+        "src/store.ts": "6d76395253d8911d97dc36fff339a63e3927bcc8096751a3615f3cf55ce573af",
+        "src/text.ts": "516e60f19035a582301475c43689406fabe9a20c1bc8d4283d70be8d9a593256",
+        "src/view.ts": "e0b9beec66b2f6f6653adab311d5041c8eb1570744f237877205d5e5ee5a8253",
+        "src/work.ts": "309dd297beea64a7cdad5fe792dcee8a5caa3c66597777b8754113facfb803b8",
+        "tables/cli-decimal.json": "bbe57bda8eefac096ed91f4f978524ca42637cc1972cae9dcc5988527ca9f67a",
+        "tables/cli-isalnum.json": "403e6dfe113f69a4388d1a4f43c59007b1db03020c5a8997c632d7552aa620a6",
+        "tables/cli-whitespace.json": "f6672243ac56ca68888b5039dce1cc2e4457fb15b00676c724c7ea902aa4760a",
+        "tables/identity-v1.json": "51dab4bc79928eef80a063130f4638864a0c97391964c81a14ad32dd999749a9",
+        "tables/py-title-u14.json": "1ce9996ab9e3dad9cda2cee963f66c7fe23f0c18d14420b6a3e5aa0fb6a0031a",
+        "tables/text-norm-v2.json": "d1b7f523d9bbd35968543ef9582837d8cd28d8bb8a1fb1771f001682618c9b69",
+        "tables/version-sensitive.json": "885032e823a1d0fc5b6eb86787762c24666871ac00748b05ef0b2394f2e33fca"
+      },
+      "supplemental": {
+        "paths": [
+          "trajecta_identity/profiles"
+        ],
+        "destination": "engines/trajecta_identity/profiles",
+        "files": {
+          "trajecta_identity/profiles/SETUP.md": "87601ff28d651ffe9663e6f6e9bb755a2038eacda2f68da620008e3874521701",
+          "trajecta_identity/profiles/_template/profile.json": "fd4e1eb882bb4d4f65598be64a0671a642c2a185a46d399622b83c8c36cc934f",
+          "trajecta_identity/profiles/companion/profile.json": "7afa43488c14d8abca26214c7c3d43456663a87c7735c81f0bfcf119f3ebf600",
+          "trajecta_identity/profiles/example/profile.json": "79378584d6b4bd618f56df68e025bb4458df63645160cd3c59b357707c62a0ba",
+          "trajecta_identity/profiles/researcher/profile.json": "ca44faac186f89082b3242a3c368be0b07c13e8f856f9715ec572d3f1851a5be"
+        }
+      }
+    },
+    "work": {
+      "repository": "https://github.com/tamvi-journal/trajecta-work-memory.git",
+      "commit": "5c696187eb5df5be7341f88296c5462488a5ae27",
+      "subdirectory": ".",
+      "paths": [
+        "src",
+        "assets",
+        "package.json"
+      ],
+      "files": {
+        "assets/mark.svg": "fe7ee787fdbd454472d21984ce4d991d55fd4f9eca10f224459b09d112a066a4",
+        "assets/trajectory-map.svg": "8995e2629dce22acc6ea336d6468b42780a0313d72792b0babbf9500cbf4ceb1",
+        "package.json": "d2825bd264c31170a70598783c29ad3ee30610299e17b400e23185b42ab920a0",
+        "src/adapters/proof/attempt-contract.ts": "03adaa4d3b43c39b861bd1911677ceea1f3efc2479fcfafa700f4bc2ecf8e74c",
+        "src/adapters/proof/attempt-ledger.ts": "aa504932b1e59f9346541dd58b759b797298a23f459e42578e844e679edac710",
+        "src/adapters/proof/attempt-resume.ts": "3bf3e0a08cecbf46b61fbf28e14652f2a0f95605a7990f2b606ed0039dd1ac09",
+        "src/adapters/proof/receipt-renderer.ts": "a6aa9eab11e92cc6a8e943e79c02cc8eb81d88978197878e269fdf15374f2e9c",
+        "src/boot.ts": "12105454c8c37131645a7b067d29a0b96cc3981511615fa33a6a9a85707d876b",
+        "src/cases.ts": "abdd8ec54dbb4ee255e0a71e3ead00fca901ebdd3852f90ffb207f48ff5003a3",
+        "src/claims.ts": "23cffdc7467990149cc6e137e98a2b9c4eb3dec5bd6764fa36c3f659adbaccfe",
+        "src/cli.ts": "e18f10199fc2863b9edaf413acf54c732234a2bd0d6e1c68c88d5e145bfdffac",
+        "src/clusters.ts": "802d095481de4c4047092b312389cfaa7c36aac8003c6af0698f1f869f519713",
+        "src/context.ts": "537d551795f497deb4f78dea739b6b29392b93939f5f9e30fbbcf6f3e4f34487",
+        "src/import-lifecycle.ts": "2c585e1372fcdec173ebae155eb17ed03d3404ec461fe31f41b967e4cfb80f41",
+        "src/index.ts": "3b025565fe8e04f45beb165b7c495d1d7143b1cff278e00266849a16a0c1efd0",
+        "src/journal.ts": "33985199f7653cf9062242ee17fbbc901a1b2040b5b32120ebcbb7ac5d0802ab",
+        "src/learning.ts": "1a4ae1f988f6f758f4e0f94c8019cb5151b04cff6eb6934deed88c45d1a47070",
+        "src/lock.ts": "2fa1bef4dcdfa3b3542b1e9376382f8805c12eab159a6e3f25edbf97d53902ae",
+        "src/mcp-server.ts": "f4fc997eebe1830ab4cab334cfc6e7a9314cddd63bfe98e18d2902c9044bef3f",
+        "src/mcp.ts": "b7c7bc4f92604f45194b8dc5ef5393cbeabc45b35c868ce63570421ecc4d8a17",
+        "src/receipts.ts": "9fd37e8c7ec8a9b0887e1e83ce98450c53deacdbf4e72d75f56f1d971d8cd514",
+        "src/relay.ts": "3d78d2f2302abad34bd508e6c855ebe5243254f14348cab5bbf4a54ffd3b8b27",
+        "src/safety.ts": "87a58e55356aa09cd882a34b30f424c0377e9bf3b3e2e713babacc29c167f536",
+        "src/skills.ts": "24147a2414f026ad79c855353e6dfec4e1939c66cae9848b3cf86e255158ac17",
+        "src/store.ts": "71bf720e79b2ddfd60f28e5fdfbe8f886cd35ba40c04e1200f48bcd6874bc0a5",
+        "src/types.ts": "7ae1f5e9f0b3021647ec2fb6bf5f5aa20b3f7697a28433df8627435068c1f33e"
+      }
+    }
+  }
+}
