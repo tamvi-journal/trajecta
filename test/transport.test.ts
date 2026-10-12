@@ -137,7 +137,7 @@ test("real script(1) PTY: accepted and mistyped authority confirmations", async 
       if (process.platform === "linux") assert.equal(result.code, accepted ? 0 : 1);
     }
 });
-test("real script(1) PTY: isatty preserved and Ctrl-C reaches child", async (t) => {
+test("real script(1) PTY: isatty preserved and Ctrl-C reaches the engine", async (t) => {
   if (process.platform === "win32") {
     t.skip("script(1) is POSIX; pipe and native-exit gates cover Windows");
     return;
@@ -156,12 +156,12 @@ test("real script(1) PTY: isatty preserved and Ctrl-C reaches child", async (t) 
     if (process.platform === "linux") assert.equal(interrupted.code, 130);
   }
 });
-test("signal sent only to parent is forwarded; child's POSIX terminating signal is re-raised", async () => {
+test("PID-directed signal and terminating signal retain the direct engine outcome", async () => {
   const root = temporary(),
     env = isolatedEnv(root);
   env.NODE_OPTIONS = "--import=" + pathToFileURL(join(ROOT, "test/transport-probe.ts")).href;
-  // Windows kill(SIGTERM) uses TerminateProcess, not a dispatchable parent signal.
-  // Hosted Windows tests prove native child termination below; console Ctrl-C is M8.
+  // Windows kill(SIGTERM) uses TerminateProcess, not a dispatchable signal.
+  // Hosted Windows tests prove native engine termination below; console Ctrl-C is M8.
   if (process.platform !== "win32") {
     env.TEST_TRANSPORT_PROBE = "signal";
     const child = spawn(process.execPath, [...flags, CLI, "identity"], { cwd: root, env });

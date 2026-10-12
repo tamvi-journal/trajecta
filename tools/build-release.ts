@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { checkDispatcher } from "./dispatcher-scan.ts";
 import { checkAuthority } from "./authority-lint.ts";
 import { verifyCompat } from "./compat.ts";
 import { engineFiles, filesIn, json, order, readLock, ROOT, sha } from "./engine-lock.ts";
@@ -8,6 +9,7 @@ import { tarball, unpack, verifyManifest } from "./archive.ts";
 
 export function build(mode: "foundation" | "release" = "foundation", fetch = true): Buffer {
   checkAuthority();
+  checkDispatcher();
   verifyCompat();
   const bin: Record<string, Buffer> = {};
   if (mode === "release") {

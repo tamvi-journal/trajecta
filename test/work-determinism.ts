@@ -1,4 +1,4 @@
-/** Child-only deterministic clocks/UUIDs, identical on both sides of the comparison. */
+/** Test-only deterministic clocks/UUIDs, identical on both sides of the comparison. */
 import crypto from "node:crypto";
 import { syncBuiltinESMExports } from "node:module";
 if (process.env.TEST_WORK_SEED) {

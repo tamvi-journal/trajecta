@@ -11,7 +11,15 @@ const run = (args: string[], cwd = ROOT) => {
   if (result.status !== 0) process.exit(result.status ?? 1);
 };
 run(["test/prepare-cli.ts"]);
-run(["--test", "test/foundation.test.ts", "test/transport.test.ts", "test/write-trace.test.ts"]);
+run([
+  "--test",
+  "test/foundation.test.ts",
+  "test/transport.test.ts",
+  "test/signals.test.ts",
+  "test/dispatcher.test.ts",
+  "test/compat.test.ts",
+  "test/write-trace.test.ts",
+]);
 run(["--test", ".isolation/cli-conformance.test.ts"]);
 const work = join(ROOT, ".isolation/upstream/work");
 const tests = readdirSync(join(work, "test"))

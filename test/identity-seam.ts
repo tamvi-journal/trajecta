@@ -1,21 +1,21 @@
-/** Identical test-only preloads for the real engine entry and the inherited-stdio product. */
+/** Identical test-only preloads at the real engine entry for direct and in-process routes. */
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { resolve } from "node:path";
-import { identityApi, prepareIdentityCli, enginePath } from "../product/src/engines.ts";
-// Only the actual identity child installs the seam. The parent remains an unmodified pass-through.
-if (process.argv[1] === enginePath("identity")) {
-  // Load its exported public CLI without racing its automatic entrypoint.
-  const entry = process.argv[1];
-  process.argv[1] = "";
-  const cli = await prepareIdentityCli();
-  process.argv[1] = entry;
+import { identityApi } from "../product/src/engines.ts";
+import { beforeIdentity } from "./entry-hook.ts";
+if (!import.meta.url.endsWith("?entry")) beforeIdentity(new URL("./identity-seam.ts?entry", import.meta.url));
+if (import.meta.url.endsWith("?entry")) {
   const { InjectedClock, WallClock, IdentityMemory, RuntimeError, StaleAuthority } = await identityApi();
   const invocation = JSON.parse(fs.readFileSync(process.env.TEST_IDENTITY_INVOCATION!, "utf8"));
   const clock = new InjectedClock();
   WallClock.prototype.seconds = () => clock.seconds();
   WallClock.prototype.micros = () => clock.micros();
+  const decay = IdentityMemory.prototype.decay;
+  IdentityMemory.prototype.decay = function (at) {
+    return decay.call(this, at ?? clock.micros());
+  };
   if (invocation.tty) {
     Object.defineProperty(process.stdin, "isTTY", { value: true });
     Object.defineProperty(process.stdout, "isTTY", { value: true });
@@ -45,11 +45,5 @@ if (process.argv[1] === enginePath("identity")) {
       return (original as any)(path, ...args);
     }) as any;
     syncBuiltinESMExports();
-  }
-  try {
-    process.exitCode = await cli.main(process.argv.slice(2), { clock });
-  } catch (error) {
-    process.stderr.write(`${(error as Error).stack ?? error}\n`);
-    process.exitCode = 1;
   }
 }

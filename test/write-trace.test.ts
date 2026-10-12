@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { CLI, ROOT, temporary, isolatedEnv } from "./support.ts";
 import { workApi } from "../product/src/engines.ts";
-test("filesystem write trace: child histories are engine-mediated, parent writes nothing", async () => {
+test("filesystem write trace: all histories are engine-mediated, dispatcher writes nothing", async () => {
   const root = temporary(),
     env = isolatedEnv(root),
     trace = join(root, "writes.jsonl");
@@ -43,7 +43,7 @@ test("filesystem write trace: child histories are engine-mediated, parent writes
   assert(rows.some((row) => row.path.endsWith(".jsonl")));
   assert(
     rows.every((row) => row.entry !== CLI),
-    "product parent itself makes no filesystem writes",
+    "dispatcher itself makes no filesystem writes",
   );
   const forbidden = join(root, "not-an-engine-store");
   const refusal = spawnSync(

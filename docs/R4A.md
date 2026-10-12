@@ -3,11 +3,13 @@
 Contract: identity R4 spec at 98313ac, plus the P4a-1–4 settlements in identity
 PR #43 at 5169a1fefc67ac674aadbc350d35e59e2d6dfd4b, merged as
 e4de9f30b55da8488a9f5e30443ed029d7e7b7e9. This implementation still requires
-Aux and Lam review at its exact head before merge.
+Aux and Lam review at its exact head before merge. The in-process §2.3
+amendment is identity PR #44 at d0e1c1995dbbabbfeb2ce550d7d3e3e2eb9c4a27,
+approved by Lam and merged as 560af299c3e5d511fb3db851a52a5288194f8f72.
 
 ## Ownership and evidence
 
-The product owns packaging, version and transport. The pinned engines own all
+The product owns packaging, version and dispatch. The pinned engines own all
 history, approval, retrieval and write semantics. The adapter is the only runtime
 module that resolves or imports engines. The product never opens SQLite.
 The test-only oracle inspectors and preloads are not shipped.
@@ -60,22 +62,40 @@ or update freshness declaration.
 - Identity: all 189 cli-v1 scenarios plus the original MANIFEST gate; preserve
   every original comparator. A separate direct-vendored versus product comparison
   requires identical stdout, stderr, exit and entire resulting file tree/hashes.
-  All engine CLI bytes run through inherited stdio. The corpus's test-only
-  terminal/clock/fault seams are applied equally in both children; real PTY tests
-  additionally run without that seam.
+  The dispatcher sets argv and imports the real CLI in the same process, through
+  the sole adapter. It touches no handlers, stdin, cwd, env, umask or fds and
+  applies no product exit/error wrapper to engine runs. Corpus test-only
+  terminal/clock/fault seams are applied at the same engine entry for both routes;
+  real PTY tests additionally run without those seams.
 - Work: run every untouched pinned work test. A preload pairs every CLI invocation
   with the vendored direct command, restoring the same root first and supplying
   identical deterministic clock/UUID inputs. Stdout/stderr/exit/signal and complete
   history bytes are exact. No work test or comparator is removed or weakened.
 - POSIX script(1): actual accepted and mistyped retract receipts, all three
-  isatty streams, Ctrl-C. A separate parent-only signal test proves forwarding
-  and a child self-signal proves POSIX re-raising. Windows interactive confirmation
-  is deferred to M8; pipe refusal and native exit tests run automatically there.
+  isatty streams, and real identity view parity under terminal Ctrl-C, TTY plus
+  PID-directed SIGINT, and process-group SIGTERM. Non-TTY SIGINT/SIGTERM and
+  both real engine entries' PID equality run on all three OSes (Windows uses
+  native process termination, compared to the direct engine exactly).
+  Windows interactive confirmation is deferred to M8.
+  View argv stays --port 0. A test-only socket allocation seam gives each pair
+  the same bind port; no transcript byte or signal/exit handler is changed.
+  A test-only PTY supervisor records the engine's native code/signal separately
+  from script(1)'s status and never forwards signals.
+- Dispatcher scan: pin the only observable statements to argv assignment and
+  the adapter's entry import, including the complete CLI routing/error boundary,
+  pure path lookup, exact built-in imports, and absence of eager/transitive product
+  dependencies or top-level effects. Injected handlers, stdin reads, writes,
+  env/cwd/umask changes, exits and hidden imports must fail the build gate.
+- Compatibility: the pinned identity engine's real status, timeline,
+  core-proposals and retrieve --readonly read v4 successfully without changing
+  store bytes, mtime, sidecars or schema. Thus readable versions remain [4, 5];
+  writing still requires v5. Default retrieval automatically disables tracking
+  on v4, matching the frozen engine; the same purity checks also pin that path.
 - Authority lint and independent source scan: all shipped product source and
   production build tools; adversarial bypass fixtures must fail both.
 - Write trace: Node fs sync/callback/promise/stream writes and native SQLite
   writable opens/SQL are audited. Trace control-file writes use saved functions.
-  The parent makes no filesystem writes. Child store writes must have engine
+  The dispatcher makes no filesystem writes. Store writes must have engine
   provenance and stay in the explicitly isolated store roots; a forbidden write
   is rejected before effect.
 - Offline: unpack the real artifact into an isolated home, remove profile env

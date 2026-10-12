@@ -1,4 +1,8 @@
 import { enginePath } from "../product/src/engines.ts";
+import { beforeIdentity } from "./entry-hook.ts";
+if (process.argv[1] !== enginePath("identity")) {
+  beforeIdentity(new URL("./transport-probe.ts?entry", import.meta.url));
+}
 if (process.argv[1] === enginePath("identity") && process.env.TEST_TRANSPORT_PROBE) {
   if (process.env.TEST_TRANSPORT_PROBE === "signal") {
     process.on("SIGINT", () => {
