@@ -1,0 +1,31 @@
+name: Foundation M2
+on:
+  push:
+    branches: [main, feat/r4a-foundation]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  foundation:
+    name: M2 (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Pin checkout byte policy
+        run: git config core.autocrlf false
+      - name: Run complete foundation gates in isolated roots
+        run: node --experimental-strip-types test/run.ts --fetch
+      - name: Exact-head evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-${{ matrix.os }}-node${{ matrix.node }}
+          path: dist/

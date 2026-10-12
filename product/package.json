@@ -1,0 +1,13 @@
+{
+  "name": "trajecta",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.19 <23 || >=24 <25"
+  },
+  "bin": {
+    "trajecta": "./src/cli.ts"
+  }
+}
