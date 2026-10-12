@@ -108,7 +108,18 @@ function live(record       )          {
   }
 }
 function bytes(path        )                {
-  return regular(path) ? fs.readFileSync(path) : null;
+  try {
+    if (!regular(path)) return null;
+    checkpoint("lock-read:before-read:" + path);
+    return fs.readFileSync(path);
+  } catch (error) {
+    const code = (error                         ).code;
+    // Another claimant/holder can remove the name after lstat. Windows also
+    // refuses an open while an unlink is pending. Neither permits proceeding.
+    if (code === "ENOENT") return null;
+    if (code === "EPERM" || code === "EACCES") throw busy();
+    throw error;
+  }
 }
 const identity = (content        )         => owner(content)?.token ?? digest(content);
 function publish(root        , name        )               {

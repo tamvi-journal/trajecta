@@ -45,6 +45,22 @@ test("publication is complete; ready live lock cannot be recovered or human-brok
   release(root, ".lock", held);
   assert.deepEqual(tree(root), {});
 });
+test("a disappearing or unreadable lock during the read refuses without claiming or writing", () => {
+  for (const code of ["ENOENT", "EPERM", "EACCES"]) {
+    const root = deadRoot(),
+      before = tree(root);
+    (globalThis as any).__lockCheckpoint = (point: string) => {
+      if (point === "lock-read:before-read:" + join(root, ".lock"))
+        throw Object.assign(new Error("forced concurrent open failure"), { code });
+    };
+    try {
+      assert.throws(() => acquire(root), /lock is busy/u);
+      assert.deepEqual(tree(root), before);
+    } finally {
+      delete (globalThis as any).__lockCheckpoint;
+    }
+  }
+});
 test("readable dead recovery claims once and acquisition/release clean stale claims", () => {
   const root = deadRoot(),
     held = acquire(root);

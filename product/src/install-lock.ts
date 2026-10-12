@@ -32,7 +32,18 @@ export function live(record: Owner): boolean {
   }
 }
 function bytes(path: string): Buffer | null {
-  return regular(path) ? fs.readFileSync(path) : null;
+  try {
+    if (!regular(path)) return null;
+    checkpoint("lock-read:before-read:" + path);
+    return fs.readFileSync(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Another claimant/holder can remove the name after lstat. Windows also
+    // refuses an open while an unlink is pending. Neither permits proceeding.
+    if (code === "ENOENT") return null;
+    if (code === "EPERM" || code === "EACCES") throw busy();
+    throw error;
+  }
 }
 export const identity = (content: Buffer): string => owner(content)?.token ?? digest(content);
 function publish(root: string, name: string): Owner | null {

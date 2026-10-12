@@ -94,7 +94,19 @@ test("real Windows bootstrap with empty production anchor changes nothing", (t) 
       { cwd: ROOT, env, encoding: "utf8" },
     );
   assert.equal(r.status, 1);
-  assert.equal(r.stderr, "trajecta: no trusted release key configured\n");
+  const probe = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-Command", `$ErrorActionPreference='Stop'
+$candidate='${process.execPath.replaceAll("'", "''")}'
+try {
+  $version = (& $candidate --version 2>$null).Trim()
+  $code=$LASTEXITCODE
+  $match=$version -match '^v?(22|24)\\.(\\d+)\\.\\d+$'
+  @{version=$version;code=$code;match=$match;major=$Matches[1];minor=$Matches[2]} | ConvertTo-Json -Compress
+} catch { [Console]::Error.WriteLine($_.Exception.ToString()); exit 1 }`],
+    { cwd: ROOT, env, encoding: "utf8" },
+  );
+  assert.equal(r.stderr, "trajecta: no trusted release key configured\n", JSON.stringify({ stderr: r.stderr, probe }));
   assert.deepEqual(tree(f.root), before);
 });
 
@@ -122,7 +134,7 @@ test("printed external anchor verifies every recovery byte before importing anyt
   fs.writeFileSync(list, JSON.stringify(data));
   const before = tree(folder);
   let refusal = spawnSync(shell, args, { cwd: ROOT, env: f.env, encoding: "utf8" });
-  assert.notEqual(refusal.status, 0);
+  assert.notEqual(refusal.status, 0, JSON.stringify({stdout: refusal.stdout, stderr: refusal.stderr, command}));
   assert.match(refusal.stderr, /recovery digest list mismatch/);
   assert.deepEqual(tree(folder), before);
   refusal = bootstrap(f, ["--resume-uninstall"]);
