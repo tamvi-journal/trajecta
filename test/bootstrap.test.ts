@@ -77,6 +77,17 @@ test("real Windows bootstrap with empty production anchor changes nothing", (t) 
   const f = signedFixture(testKey()),
     env = { ...f.env };
   delete env.NODE_OPTIONS;
+  // powershell.exe itself materializes per-user shell state (AppData/Roaming,
+  // LOCALAPPDATA/Microsoft/Windows/Caches) under the isolated home on first
+  // start. Run the identical shell once with a no-op command so that state
+  // exists before the snapshot; the installer run must then change nothing.
+  const control = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "exit 0"], {
+    cwd: ROOT,
+    env,
+    encoding: "utf8",
+  });
+  assert.equal(control.status, 0, control.stderr);
+  assert(!fs.existsSync(join(f.root, "install")));
   const before = tree(f.root),
     r = spawnSync(
       "powershell.exe",
