@@ -21,4 +21,10 @@ echo FOR_FINDSTR
 echo PRINTABLE
 "%SystemRoot%\System32\findstr.exe" /p /r /n /c:"^" "%~1"
 echo PRINTABLE_STATUS=%errorlevel%
+echo DOLLAR
+"%SystemRoot%\System32\findstr.exe" /r /c:".$" "%~1"
+echo DOLLAR_STATUS=%errorlevel%
+echo NONASCII
+"%SystemRoot%\System32\findstr.exe" /r /c:"[^ -~]" "%~1"
+echo NONASCII_STATUS=%errorlevel%
 exit /b 0
