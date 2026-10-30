@@ -104,6 +104,36 @@ test("labels: Unicode, overlong ASCII and colliding transliterations retain dete
   await assert.rejects(pluginFiles({ root: "/x", profile: "example", name: "a".repeat(60) }), PluginInputError);
 });
 
+test("explicit POSIX target is independent of a Windows host path implementation", async () => {
+  const hook = registerHooks({
+    load(url, context, next) {
+      const result = next(url, context);
+      if (!url.includes("plugin.ts?windows-host")) return result;
+      const source = typeof result.source === "string" ? result.source : Buffer.from(result.source!).toString();
+      const changed = source.replace(
+        /import \{([^}]+)\} from "node:path";/u,
+        (_, fields: string) =>
+          `import {${fields
+            .split(",")
+            .filter((x) => x.trim() !== "join")
+            .join(",")}} from "node:path"; const join = win32.join;`,
+      );
+      assert.notEqual(changed, source);
+      return { ...result, source: changed };
+    },
+  });
+  try {
+    const fresh = await import(new URL("../product/src/plugin.ts?windows-host", import.meta.url).href);
+    const files = await fresh.pluginFiles({ root: "/isolated/install", profile: "example" }, "posix");
+    assert.equal(
+      JSON.parse(files[".mcp.json"].toString()).mcpServers["trajecta-identity-example"].args[0],
+      "/isolated/install/bin/trajecta-mcp",
+    );
+  } finally {
+    hook.deregister();
+  }
+});
+
 test("Windows K4 safety refuses every forbidden argument/default before writing", async () => {
   for (const char of [...'%!^&|<>"()', "\n", "\r", "\0", "\u007f", "\\"]) {
     await assert.rejects(

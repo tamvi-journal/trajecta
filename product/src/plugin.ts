@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { dirname, join, win32 } from "node:path";
+import { dirname, join, win32, posix } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 import { safeProfileName } from "./engines.ts";
@@ -80,7 +80,7 @@ export async function pluginFiles(
     commands[label] =
       target === "windows"
         ? { command: "cmd.exe", args: ["/d", "/c", win32.join(opts.root, "bin", "trajecta-mcp.cmd"), ...recipe] }
-        : { command: "/bin/sh", args: [join(opts.root, "bin", "trajecta-mcp"), ...recipe] };
+        : { command: "/bin/sh", args: [posix.join(opts.root, "bin", "trajecta-mcp"), ...recipe] };
   }
   const version = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
   return {
