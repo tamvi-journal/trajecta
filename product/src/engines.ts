@@ -19,6 +19,16 @@ export async function prepareIdentityCli() {
 export async function workApi() {
   return import("../../engines/work/src/index.ts");
 }
+/** Frozen R2d filename rule, from the pinned identity public paths module. */
+export async function safeProfileName(profile: string): Promise<string> {
+  return (await import("../../engines/identity/src/paths.ts")).safeFsName(profile);
+}
+/** MCP has its own recipe boundary; the entries retain their own error envelopes. */
+export async function runEngineMcp(engine: Engine, argv: string[]): Promise<void> {
+  const entry = enginePath(engine, engine === "identity" ? "mcp.ts" : "mcp-server.ts");
+  process.argv = [process.execPath, entry, ...argv];
+  await import(pathToFileURL(entry).href);
+}
 /** Only verified version roots supplied by install/recovery may reach these public entries. */
 export async function identityInstall(versionRoot: string, argv: string[], env: Record<string, string | undefined>) {
   const cli = await import(pathToFileURL(versionRoot + "/engines/identity/src/cli.ts").href);
@@ -113,10 +123,11 @@ async function runStagedResume(staging, version, argv, token) {
 async function main() {
   if (!TRUST_ANCHOR) throw Error('no trusted release key configured');
   const argv=process.argv.slice(1), values={};
-  let resume=false;
+  let resume=false,noUserBin=false;
   for(let i=0;i<argv.length;) {
     if(argv[i]==='--resume-uninstall') {resume=true;i++;continue;}
-    if(!['--root','--release','--db','--profile','--work-root'].includes(argv[i]) || argv[i+1]===undefined)
+    if(argv[i]==='--no-user-bin') {noUserBin=true;i++;continue;}
+    if(!['--root','--release','--db','--profile','--work-root','--user-bin'].includes(argv[i]) || argv[i+1]===undefined)
       throw Error('invalid bootstrap option: '+argv[i]);
     values[argv[i]]=argv[i+1];i+=2;
   }
@@ -150,7 +161,8 @@ async function main() {
     checked.extract();
     const args=['--root',root,'--release',releaseDir];
     if(!resume)args.push('--staged',staging,'--lock-token',held.token);
-    for(const name of ['--db','--profile','--work-root']) if(values[name]!==undefined) args.push(name,values[name]);
+    for(const name of ['--db','--profile','--work-root','--user-bin']) if(values[name]!==undefined) args.push(name,values[name]);
+    if(noUserBin)args.push('--no-user-bin');
     return resume ? await runStagedResume(staging,metadata.version,args,held.token) : await runStagedInstall(staging,metadata.version,args);
   } finally {
     if(staging && fs.existsSync(staging)) fs.rmSync(staging,{recursive:true});

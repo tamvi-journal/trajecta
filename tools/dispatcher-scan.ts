@@ -12,6 +12,16 @@ export function scanDispatcher(cli: string, adapter: string): void {
   const bootstrap = /export function bootstrapEntrySource\([^]*?\n\}\s*$/u.exec(adapter)?.[0];
   const dependencySource = adapter.replace(verifier ?? "", "").replace(bootstrap ?? "", "");
   const pass = /export async function passThrough\([^]*?\n\}/u.exec(adapter)?.[0];
+  const mcp = /export async function runEngineMcp\([^]*?\n\}/u.exec(adapter)?.[0];
+  if (
+    compact(mcp ?? "") !==
+    compact(`export async function runEngineMcp(engine: Engine, argv: string[]): Promise<void> {
+    const entry = enginePath(engine, engine === "identity" ? "mcp.ts" : "mcp-server.ts");
+    process.argv = [process.execPath, entry, ...argv];
+    await ${"im" + "port"}(pathToFileURL(entry).href);
+  }`)
+  )
+    fail();
   if (
     compact(pass ?? "") !==
     compact(`export async function passThrough(engine: Engine, argv: string[]): Promise<void> {
@@ -36,6 +46,8 @@ export function scanDispatcher(cli: string, adapter: string): void {
     const [command, ...args] = process.argv.slice(2);
     if (command === "identity" || command === "work") {
       await passThrough(command, args);
+    } else if (command === "mcp") {
+      await (await ${"im" + "port"}("./mcp.ts")).runMcp(args);
     } else {
       main()
         .then((code) => { process.exitCode = code; })
@@ -92,12 +104,13 @@ export function scanDispatcher(cli: string, adapter: string): void {
   if (
     bootstrap &&
     createHash("sha256").update(bootstrap).digest("hex") !==
-      "072849eaf7c03b05f031ddf63602c41e3f3bfc29682b290afb218c4e6b0634f6"
+      "08c9c13c2d5a337d24a74d500647c04c37f693e83d06f750045ff69f004d890c"
   )
     fail();
   const outsidePass = compact(
     adapter
       .replace(pass!, "")
+      .replace(mcp!, "")
       .replace(verifier ?? "", "")
       .replace(bootstrap ?? "", ""),
   );

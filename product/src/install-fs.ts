@@ -42,14 +42,15 @@ export function syncDir(path: string): void {
     fs.closeSync(fd);
   }
 }
-export function atomic(path: string, bytes: Buffer, point: string): void {
+export function atomic(path: string, bytes: Buffer, point: string, mode = 0o600): void {
   safeRoot(dirname(path));
   regular(path);
   const tmp = path + ".tmp";
   if (regular(tmp)) fs.unlinkSync(tmp);
-  const fd = fs.openSync(tmp, "wx", 0o600);
+  const fd = fs.openSync(tmp, "wx", mode);
   try {
     fs.writeFileSync(fd, bytes);
+    fs.fchmodSync(fd, mode);
     fs.fsyncSync(fd);
   } finally {
     fs.closeSync(fd);

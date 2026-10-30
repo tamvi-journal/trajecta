@@ -10,6 +10,7 @@ import { probeNode, handoffNode, supported } from "./node-probe.ts";
 import { requireAnchor } from "./release.ts";
 import { recoveryVerifierSource } from "./engines.ts";
 import { checkpoint } from "./checkpoint.ts";
+import { reportExternal } from "./shared-effects.ts";
 
 function versions(root: string): string[] {
   return fs
@@ -38,7 +39,9 @@ function unlink(root: string, name: string): void {
   checkpoint("U:after-unlink:" + name);
 }
 function removeScope(root: string, scope: string, data: Ledger): string[] {
-  const entries = Object.entries(data.entries).filter(([, entry]) => entry.scope === scope);
+  const entries = Object.entries(data.entries).filter(
+    ([, entry]) => entry.scope === scope && entry.kind !== "external-report",
+  );
   const priority = (name: string) => (name.endsWith("/.planned.json") ? 1 : name.endsWith("/MANIFEST.json") ? 2 : 0);
   for (const [name, entry] of entries
     .filter(([, e]) => e.kind === "file")
@@ -164,6 +167,7 @@ async function uninstallWithLock(argv: string[], inherited?: Owner): Promise<num
     }
     const data = ledger(opts.root),
       installed = versions(opts.root);
+    if (!version) reportExternal(data);
     for (const ver of installed) adopt(opts.root, ver, data, true);
     checkpoint("U:converge");
     if (version) {

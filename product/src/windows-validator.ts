@@ -1,4 +1,4 @@
-/** Read-only Windows validator. Root substitution follows compaction, never precedes it. */
+/** Read-only Windows validator. Preserve statement boundaries and insert the literal root once. */
 export function windowsValidator(root: string): string {
   const source = `
 $ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.Encoding]::ASCII;
@@ -38,6 +38,5 @@ $n=$b.ToString();if(!$n -or $n -cmatch $z){O 'ERR|NODEPATH'}
 O "OK|$v|$n"
 }catch{D}
 `;
-  return source.split("\n").map((line) => line.trim()).join("")
-    .replace("ROOT_LITERAL", () => "'" + root.replaceAll("'", "''") + "'");
+  return source.trim().replace("ROOT_LITERAL", () => "'" + root.replaceAll("'", "''") + "'");
 }

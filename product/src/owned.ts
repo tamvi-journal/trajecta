@@ -1,9 +1,13 @@
 import * as fs from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, sep, isAbsolute } from "node:path";
 import { atomic, beneath, digest, jsonBytes, readJson, regular, safeRoot } from "./install-fs.ts";
 import { verifyMetadata, authenticateManifest } from "./release.ts";
+import { readShared, validateShared } from "./shared-effects.ts";
 
-export type Entry = { kind: "file"; sha256: string; scope: string } | { kind: "directory"; scope: string };
+export type Entry =
+  | { kind: "file"; sha256: string; scope: string }
+  | { kind: "directory"; scope: string }
+  | { kind: "external-report"; scope: "shared"; dev: string; ino: string };
 export type Ledger = {
   schema: "trajecta.owned/v1";
   root: string;
@@ -19,6 +23,11 @@ export function ledger(root: string): Ledger {
   if (data.schema !== "trajecta.owned/v1" || data.root !== root || !data.entries || !data.effects)
     throw new Error("invalid ownership ledger");
   for (const [path, entry] of Object.entries(data.entries) as Array<[string, Entry]>) {
+    if (entry.kind === "external-report") {
+      if (!isAbsolute(path) || entry.scope !== "shared" || !/^\d+$/u.test(entry.dev) || !/^\d+$/u.test(entry.ino))
+        throw new Error("unsafe external report");
+      continue;
+    }
     if (
       beneath(root, join(root, path)) !== path ||
       !["file", "directory"].includes(entry.kind) ||
@@ -83,10 +92,13 @@ export function buildPlan(
     "release.json",
     "release.json.sig",
     "node",
+    ...walk(join(folder, ".install-effects"))
+      .filter((path) => fs.lstatSync(path).isFile())
+      .map((path) => relative(folder, path).split(sep).join("/")),
   ].sort())
     files[version + "/" + path] = digest(fs.readFileSync(join(folder, path)));
   const implied = new Set<string>([version]);
-  for (const name of Object.keys(manifest.files)) {
+  for (const name of Object.keys(files).map((name) => name.slice(version.length + 1))) {
     let parent = dirname(name).split(sep).join("/");
     while (parent !== ".") {
       implied.add(version + "/" + parent);
@@ -103,6 +115,7 @@ export function buildPlan(
     directories,
     effects: ["identity-public-init", "doctor"],
     bootstrap,
+    ...(readShared(folder) ? { shared: readShared(folder) } : {}),
   };
 }
 export function adopt(root: string, version: string, data: Ledger, includePlan = false): void {
@@ -138,6 +151,27 @@ export function adopt(root: string, version: string, data: Ledger, includePlan =
     const expected = jsonBytes(buildPlan(root, version, manifest, plan.directories, plan.bootstrap));
     if (fs.readFileSync(path).equals(expected))
       data.entries[version + "/.planned.json"] = { kind: "file", sha256: digest(expected), scope: version };
+  }
+  if (plan.shared) {
+    const receipt = data.entries[version + "/.planned.json"];
+    const shared =
+      receipt?.kind === "file" && digest(fs.readFileSync(path)) === receipt.sha256
+        ? plan.shared
+        : readShared(join(root, version));
+    validateShared(shared);
+    if (JSON.stringify(shared) !== JSON.stringify(plan.shared))
+      throw new Error("shared plan differs from staged bytes");
+    for (const [name, entry] of Object.entries(shared!.files)) {
+      const file = join(root, name);
+      beneath(root, file);
+      if (entry.eligible && !data.entries[name] && regular(file) && digest(fs.readFileSync(file)) === entry.sha256)
+        data.entries[name] = { kind: "file", scope: "shared", sha256: entry.sha256 };
+    }
+    for (const name of shared!.directories)
+      if (fs.existsSync(join(root, name)) && !data.entries[name]) {
+        safeRoot(join(root, name));
+        data.entries[name] = { kind: "directory", scope: "shared" };
+      }
   }
   saveLedger(root, data);
 }

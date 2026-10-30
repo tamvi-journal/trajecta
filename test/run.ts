@@ -19,6 +19,9 @@ run([
   "test/dispatcher.test.ts",
   "test/compat.test.ts",
   "test/write-trace.test.ts",
+  "test/plugin.test.ts",
+  "test/posix-wrapper.test.ts",
+  "test/windows-wrapper.test.ts",
 ]);
 run([
   "--test",
@@ -34,6 +37,8 @@ run([
   "test/install-authority.test.ts",
   "test/bootstrap.test.ts",
   "test/extractor.test.ts",
+  "test/shared-effects.test.ts",
+  "test/mcp-wrapper.test.ts",
 ]);
 run(["--test", ".isolation/cli-conformance.test.ts"]);
 const work = join(ROOT, ".isolation/upstream/work");

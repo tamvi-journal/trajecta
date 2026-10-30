@@ -1,7 +1,87 @@
 import { windowsValidator } from "./windows-validator.ts";
 
 export class WrapperBuildError extends Error {
-  constructor(message: string) { super(message); this.name = "WrapperBuildError"; }
+  constructor(message: string) {
+    super(message);
+    this.name = "WrapperBuildError";
+  }
+}
+
+export function shQuote(value: string): string {
+  if (value.includes("\0")) throw new WrapperBuildError("shell path contains NUL");
+  return "'" + value.replaceAll("'", "'\\''") + "'";
+}
+
+export function userStub(root: string): string {
+  return `#!/bin/sh
+R=${shQuote(root)}
+[ -f "$R/bin/trajecta" ] || { printf 'trajecta: not installed at %s; run the installer, or remove %s\\n' "$R" "$0" >&2; exit 1; }
+exec /bin/sh "$R/bin/trajecta" "$@"
+`;
+}
+
+export function posixWrapper(root: string, mcp: boolean): string {
+  return `#!/bin/sh
+R=${shQuote(root)}
+damaged() { printf 'trajecta: installation at %s is damaged; run the installer\\n' "$R" >&2; exit 1; }
+missing() { printf 'trajecta: not installed at %s; run the installer\\n' "$R" >&2; exit 1; }
+resume() { printf '%s\\n' "trajecta is being uninstalled; resume with the command printed by 'trajecta uninstall', or run the installer bootstrap with --resume-uninstall"; }
+[ -e "$R/current" ] || { [ -L "$R/current" ] && damaged; missing; }
+[ -f "$R/current" ] && [ ! -L "$R/current" ] || damaged
+[ -r "$R/current" ] || missing
+C=$(/usr/bin/wc -c < "$R/current" 2>/dev/null) || missing
+[ "$C" -le 256 ] || damaged
+H=$(/usr/bin/od -An -v -tx1 "$R/current" 2>/dev/null) || missing
+S=$(printf '%s' "$H" | /usr/bin/tr -d ' \\n')
+if [ "$S" = 756e696e7374616c6c696e670a ]; then
+${
+  mcp
+    ? "resume >&2; exit 1"
+    : `if [ "$#" = 2 ] && [ "$1" = uninstall ] && [ "$2" = --status ]; then
+printf 'trajecta: uninstall in progress at %s\\n' "$R"
+resume
+exit 3
+fi
+resume >&2; exit 1`
+}
+fi
+L=0
+B=
+for B in $H; do
+case "$B" in
+0a) L=$((L+1));;
+2d|2e|3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]) ;;
+*) damaged;;
+esac
+done
+[ "$L" = 2 ] && [ "$B" = 0a ] || damaged
+{ IFS= read -r V && IFS= read -r P; } < "$R/current" || damaged
+version() { printf '%s\\n' "$1" | /usr/bin/grep -Eq '^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$'; }
+version "$V" || damaged
+[ -z "$P" ] || version "$P" || damaged
+[ -d "$R/$V" ] && [ ! -L "$R/$V" ] || damaged
+[ -f "$R/$V/node" ] && [ ! -L "$R/$V/node" ] || damaged
+H=$(/usr/bin/od -An -v -tu1 "$R/$V/node" 2>/dev/null) || damaged
+L=0
+B=
+for B in $H; do
+case "$B" in
+10) L=$((L+1));;
+[0-9]|[12][0-9]|3[01]|127) damaged;;
+esac
+done
+[ "$L" = 1 ] && [ "$B" = 10 ] || damaged
+IFS= read -r N < "$R/$V/node" || damaged
+case "$N" in /*) ;; *) damaged;; esac
+need() { printf '%s: need Node 22.19+ or 24 LTS\\n' ${mcp ? '"${1-}"' : "trajecta"} >&2; exit 1; }
+PV=$("$N" --version 2>/dev/null) || need ${mcp ? '"${1-}"' : ""}
+PV=\${PV#v}
+MA=\${PV%%.*}; T=\${PV#*.}; MI=\${T%%.*}; PA=\${T#*.}
+[ "$PV" != "$T" ] && [ "$T" != "$PA" ] && [ -n "$MA" ] && [ -n "$MI" ] && [ -n "$PA" ] || need ${mcp ? '"${1-}"' : ""}
+case "$MA:$MI:$PA" in *[!0-9:]*) need ${mcp ? '"${1-}"' : ""};; esac
+case "$MA" in 24) ;; 22) [ "$MI" -ge 19 ] 2>/dev/null || need ${mcp ? '"${1-}"' : ""};; *) need ${mcp ? '"${1-}"' : ""};; esac
+exec "$N" "$R/$V/product/src/cli.ts" ${mcp ? "mcp " : ""}"$@"
+`;
 }
 
 export function windowsWrapper(root: string, powershell: string, mcp: boolean): string {
