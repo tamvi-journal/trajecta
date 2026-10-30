@@ -50,3 +50,19 @@ test("dispatcher source: argv and import only; engine never enters the product e
   );
   assert.throws(() => scanDispatcher(cli, 'import "./hidden-effects.ts";\n' + adapter), /observable/);
 });
+
+test("pure recovery verifier source is separately pinned; extra effects remain forbidden", () => {
+  const cli = fs.readFileSync(join(ROOT, "product/src/cli.ts"), "utf8");
+  const adapter = fs.readFileSync(join(ROOT, "product/src/engines.ts"), "utf8");
+  assert.throws(
+    () =>
+      scanDispatcher(
+        cli,
+        adapter.replace(
+          "export function recoveryVerifierSource(root: string, anchor: string): string {",
+          "export function recoveryVerifierSource(root: string, anchor: string): string {\n  process.stdout.write('effect');",
+        ),
+      ),
+    /observable/,
+  );
+});
