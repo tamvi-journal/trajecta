@@ -35,7 +35,12 @@ const records = Object.entries(fixtures).map(([name, bytes]) => {
       timeout: 15000,
     },
   );
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.status,
+    0,
+    JSON.stringify({ fixture: name, error: result.error?.message, signal: result.signal,
+      stdout: result.stdout, stderr: result.stderr }),
+  );
   const fieldText = result.stdout.match(/FIELDS\r?\n([^\r\n]+)/u)?.[1];
   assert(fieldText, result.stdout);
   return {
