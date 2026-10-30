@@ -138,6 +138,11 @@ test(
       const before = tree(outside);
       publishUserStub(root, dir, data);
       assert.deepEqual(tree(outside), before);
+    const ancestor = join(outside, "not-a-directory");
+    fs.writeFileSync(ancestor, "foreign ancestor");
+    const wrongKind = tree(outside);
+    publishUserStub(root, join(ancestor, "user-bin"), data);
+    assert.deepEqual(tree(outside), wrongKind);
       fs.mkdirSync(dir);
       const target = join(dir, "trajecta");
       fs.writeFileSync(target, "foreign");

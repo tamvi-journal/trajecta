@@ -133,7 +133,7 @@ export function publishUserStub(root: string, dir: string, data: Ledger): void {
       return;
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) {
       skip();
       return;
     }
