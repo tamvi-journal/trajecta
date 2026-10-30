@@ -43,6 +43,8 @@ const records = Object.entries(fixtures).map(([name, bytes]) => {
     hex: bytes.toString("hex"),
     size: bytes.length,
     fields: JSON.parse(fieldText),
+    forFile: JSON.parse(result.stdout.match(/FOR_FILE\r?\n([^\r\n]+)/u)![1]),
+    forFindstr: JSON.parse(result.stdout.match(/FOR_FINDSTR\r?\n([^\r\n]+)/u)![1]),
     stdout: result.stdout,
     stderr: result.stderr,
   };
