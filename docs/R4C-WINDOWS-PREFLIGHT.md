@@ -1,5 +1,11 @@
 # R4c Windows byte-validation STOP
 
+**Historical evidence; settled by identity #49 (`dbcaaf66015cc65800fdd871ea20e5d352e08300`).**
+§13.5 authorizes the pinned raw-byte PowerShell validator now implemented in this
+draft. The observations below remain intact as provenance, not an active STOP.
+Native certification of the replacement is still pending. See
+[remaining preflight](R4C-REMAINING-PREFLIGHT.md) for current S4/S5 and CI status.
+
 Contract: identity PR 48, merged `2edb23ad4a2daae597ce9702e80249e6804b3411`,
 R4 §13.3. Existing S1–S3 settlements stay closed. This is the explicitly
 required capability STOP for the native Windows byte validator.
@@ -15,11 +21,11 @@ Fixture bytes and inventory were checked unchanged.
 Run [41095661097](https://github.com/tamvi-journal/trajecta/actions/runs/41095661097)
 at `0f292691454fa530fd27695414e2e39031fd5c60` produced this distinguishing input:
 
-| Record | Full hex | Bytes | `set /p` value |
-|---|---|---:|---|
-| Valid LF | `433a5c666978747572655c6e6f64652e6578650a` | 20 | `C:\fixture\node.exe` |
-| Invalid bare CR | `433a5c666978747572655c6e6f64652e6578650d` | 20 | `C:\fixture\node.exe` |
-| Invalid NUL | `433a5c666978747572655c6e6f64652e65786500` | 20 | `C:\fixture\node.exe` |
+| Record          | Full hex                                   | Bytes | `set /p` value        |
+| --------------- | ------------------------------------------ | ----: | --------------------- |
+| Valid LF        | `433a5c666978747572655c6e6f64652e6578650a` |    20 | `C:\fixture\node.exe` |
+| Invalid bare CR | `433a5c666978747572655c6e6f64652e6578650d` |    20 | `C:\fixture\node.exe` |
+| Invalid NUL     | `433a5c666978747572655c6e6f64652e65786500` |    20 | `C:\fixture\node.exe` |
 
 The LF/bare-CR pair also has identical `FOR /F` file values and identical
 `FOR /F(FINDSTR /r /n /c:"^")` values. `FIND /v /c ""` reports one line for
