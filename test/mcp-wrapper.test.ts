@@ -141,6 +141,7 @@ test("K4 concurrent actual MCP entries observe independent same-key home default
           TEST_RECIPE_RECEIPT: receipt,
         };
       delete env.TRAJECTA_IDENTITY_DATA_DIR;
+      if (process.platform === "win32") env.HOME = join(f.root, "ignored-home-sentinel");
       const child = spawn(entry.command, entry.args, { env, stdio: ["pipe", "pipe", "pipe"] });
       const out: Buffer[] = [],
         err: Buffer[] = [];
@@ -162,7 +163,9 @@ test("K4 concurrent actual MCP entries observe independent same-key home default
       assert.equal(JSON.parse(Buffer.concat(out).toString()).id, 1);
       assert.equal(Buffer.concat(err).toString(), "");
       const observed = JSON.parse(fs.readFileSync(receipt, "utf8"));
-      assert.equal(observed.value, join(env.HOME, profile));
+      // P24/§13.2 substitute the home prefix; the remaining slash is verbatim.
+      const home = process.platform === "win32" ? env.USERPROFILE : env.HOME;
+      assert.equal(observed.value, home + "/" + profile);
       assert(!fs.existsSync(observed.value), "initialize cannot bootstrap the default path");
       return observed;
     }),

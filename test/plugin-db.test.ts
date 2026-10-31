@@ -6,7 +6,7 @@ import { inflateRawSync } from "node:zlib";
 import test from "node:test";
 import { pluginFiles, PluginInputError } from "../product/src/plugin.ts";
 import { signedFixture, testKey } from "./install-fixture.ts";
-import { CLI, ROOT, tree } from "./support.ts";
+import { CLI, ROOT, temporary, tree } from "./support.ts";
 
 function mcpFromZip(path: string): any {
   const bytes = fs.readFileSync(path);
@@ -24,14 +24,14 @@ function mcpFromZip(path: string): any {
   throw new Error("archive lacks MCP recipe");
 }
 test("S5 explicit database reaches the identity recipe; profile-only keeps runtime default resolution", async () => {
-  const files = await pluginFiles({ root: "/isolated", profile: "example", db: "/isolated/custom.sqlite3" }, "posix");
+  const root = temporary(),
+    db = join(root, "custom.sqlite3");
+  const files = await pluginFiles({ root, profile: "example", db });
   const servers = JSON.parse(files[".mcp.json"].toString()).mcpServers;
-  assert.deepEqual(servers["trajecta-identity-example"].args.slice(-4), [
-    "--profile",
-    "example",
-    "--db",
-    "/isolated/custom.sqlite3",
-  ]);
+  assert.deepEqual(servers["trajecta-identity-example"].args.slice(-4), ["--profile", "example", "--db", db]);
+  const profileOnly = JSON.parse((await pluginFiles({ root, profile: "example" }))[".mcp.json"].toString()).mcpServers;
+  assert.deepEqual(profileOnly["trajecta-identity-example"].args.slice(-2), ["--profile", "example"]);
+  assert(!profileOnly["trajecta-identity-example"].args.includes("--db"));
   for (const char of [...'%!^&|<>"()', "\n"])
     await assert.rejects(
       pluginFiles({ root: "C:\\isolated", profile: "example", db: "C:\\custom" + char }, "windows"),

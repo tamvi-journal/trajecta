@@ -235,6 +235,15 @@ test("MCP recipe usage errors exit 2 before touching any store", () => {
   assert.match(result.stderr, /missing --/);
   assert.deepEqual(tree(folder), before);
 });
+
+test("K4 home substitution preserves the remaining default bytes without path normalization", () => {
+  for (const prefix of ["~/", "$HOME/"]) {
+    const recipe = parseRecipe(["server", "--engine", "work", "--default", "TRAJECTA_HOME", prefix + "a/../b", "--"]);
+    const env: Record<string, string> = {};
+    applyDefaults(recipe, env, () => "C:\\isolated\\home");
+    assert.equal(env.TRAJECTA_HOME, "C:\\isolated\\home/a/../b");
+  }
+});
 test("stored plugin writer source fence refuses lossy JSON.parse at every plugin writer boundary", () => {
   for (const name of ["plugin.ts", "plugin-generations.ts", "plugin-command.ts"])
     assert.throws(() => lintSource("product/src/" + name, "const recipe = JSON.parse(bytes);"), /lossy/u);

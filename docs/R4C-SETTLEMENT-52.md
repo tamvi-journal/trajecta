@@ -109,3 +109,14 @@ find the path specified." That fixture now compares the wrapper's exact
 stdout/stderr/exit/launch marker to the identical direct CMD command.
 It retains the namespace-branch exercise and permits no output difference;
 drive/forward-slash real OK cases still require exit zero and empty stderr.
+
+With the native guard/smoke green at `18f4da1`, full Windows run
+`41195667313` reached two previously masked portability mistakes in tests.
+K4 expected `path.join(home, profile)`, which rewrote the slash left by the
+specified home-prefix substitution. It now compares the exact `home + rest`
+bytes and supplies a contradictory HOME on Windows to check USERPROFILE.
+A pure test also preserves a Windows home plus the literal `a/../b` suffix.
+S5 supplied a POSIX-only db path while running on Windows. It now uses an
+isolated native absolute db input and the native target, asserting that
+exact same path in the recipe and no --db for profile-only. No actual output
+is normalized and both exact comparators remain; no production change.
