@@ -7,6 +7,8 @@ import { signedFixture, testKey } from "./install-fixture.ts";
 import { CLI, ROOT, temporary, isolatedEnv, tree } from "./support.ts";
 import { pluginFiles } from "../product/src/plugin.ts";
 import { prewarmWindowsHost } from "./windows-host-a.ts";
+import { receipt } from "./native-m5-support.ts";
+import { pathToFileURL } from "node:url";
 
 test("M5: real identity/work initialize stdout is byte-exact directly and through each OS-native wrapper", async () => {
   const f = signedFixture(testKey()),
@@ -37,23 +39,69 @@ test("M5: real identity/work initialize stdout is byte-exact directly and throug
   const input = Buffer.from(
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}\n',
   );
+  const evidence: unknown[] = [];
   for (const [label, entry] of Object.entries(servers) as Array<[string, any]>) {
     const identity = label.startsWith("trajecta-identity");
+    const observed = join(f.root, "mcp-entry.json");
+    const runEnv =
+      process.platform === "win32"
+        ? env
+        : {
+            ...env,
+            NODE_OPTIONS: "--import=" + pathToFileURL(join(ROOT, "test/native-m5-entry-observer.ts")).href,
+            TEST_M5_ENTRY_RECEIPT: observed,
+          };
     const direct = spawnSync(
       process.execPath,
       [
         join(root, "0.5.0/engines", identity ? "identity/src/mcp.ts" : "work/src/mcp-server.ts"),
         ...(identity ? ["--profile", "example"] : []),
       ],
-      { env, input, timeout: 15000 },
+      { env: runEnv, input, timeout: 15000 },
     );
-    const wrapped = spawnSync(entry.command, entry.args, { env, input, timeout: 15000 });
+    const directEntry =
+      process.platform === "win32" || !fs.existsSync(observed) ? null : JSON.parse(fs.readFileSync(observed, "utf8"));
+    if (fs.existsSync(observed)) fs.unlinkSync(observed);
+    const wrapped = spawnSync(entry.command, entry.args, { env: runEnv, input, timeout: 15000 });
+    const wrappedEntry =
+      process.platform === "win32" || !fs.existsSync(observed) ? null : JSON.parse(fs.readFileSync(observed, "utf8"));
+    evidence.push({
+      label,
+      command: entry.command,
+      args: entry.args,
+      input_hex: input.toString("hex"),
+      direct: {
+        pid: direct.pid,
+        status: direct.status,
+        stdout_hex: direct.stdout?.toString("hex"),
+        stderr_hex: direct.stderr?.toString("hex"),
+        entry: directEntry,
+      },
+      wrapped: {
+        pid: wrapped.pid,
+        status: wrapped.status,
+        stdout_hex: wrapped.stdout?.toString("hex"),
+        stderr_hex: wrapped.stderr?.toString("hex"),
+        entry: wrappedEntry,
+      },
+    });
+    receipt("mcp-framing-posix-and-cmd", { root, results: evidence });
     assert.equal(direct.status, 0, direct.stderr.toString());
     assert.equal(wrapped.status, direct.status, wrapped.stderr.toString());
     assert.deepEqual(wrapped.stdout, direct.stdout);
     assert.deepEqual(wrapped.stderr, direct.stderr);
     assert.equal(wrapped.stdout.toString().split("\n").length, 2);
     assert.equal(JSON.parse(wrapped.stdout.toString()).id, 1);
+    if (process.platform !== "win32") {
+      assert(wrappedEntry && directEntry);
+      assert.equal(wrappedEntry.pid, wrapped.pid, "real engine PID equals /bin/sh wrapper PID");
+      assert.deepEqual(wrappedEntry.argv, directEntry.argv);
+      assert.equal(wrappedEntry.tree_status, 0);
+      assert.equal(wrappedEntry.tree_stderr, "");
+      const ancestors = JSON.parse(wrappedEntry.tree_stdout);
+      assert.equal(ancestors[0].pid, wrapped.pid);
+      assert(!ancestors.some((p: any) => /powershell|pwsh/iu.test(p.name)));
+    }
   }
   assert.deepEqual(tree(root), before);
   assert.deepEqual(tree(join(f.root, "identity")), stores);

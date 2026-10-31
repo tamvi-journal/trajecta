@@ -126,7 +126,14 @@ class NativeM5 {
         prompt_utf16le_base64=Convert.ToBase64String(Encoding.Unicode.GetBytes(promptText)),
         after_utf16le_base64=Convert.ToBase64String(Encoding.Unicode.GetBytes(final)) };
     } finally {
-      GetExitCodeProcess(p.process,out code);if(code==259)TerminateProcess(p.process,1);
+      GetExitCodeProcess(p.process,out code);
+      if(code==259) {
+        // Only the still-live console child created above and its descendants.
+        ProcessStartInfo cleanup=new ProcessStartInfo(Path.Combine(Environment.SystemDirectory,"taskkill.exe"),"/PID "+p.pid+" /T /F");
+        cleanup.UseShellExecute=false;cleanup.CreateNoWindow=true;
+        using(Process killer=Process.Start(cleanup))killer.WaitForExit(5000);
+        GetExitCodeProcess(p.process,out code);if(code==259)TerminateProcess(p.process,1);
+      }
       if(output!=IntPtr.Zero)CloseHandle(output);if(input!=IntPtr.Zero)CloseHandle(input);
       FreeConsole();CloseHandle(p.thread);CloseHandle(p.process);
     }
