@@ -9,6 +9,7 @@ import { windowsWrapper } from "../product/src/wrappers.ts";
 function receipt(value: SpawnSyncReturns<Buffer>) {
   return {
     status: value.status,
+    status_hex: value.status === null ? null : "0x" + (value.status >>> 0).toString(16).padStart(8, "0"),
     signal: value.signal,
     error: value.error ? { name: value.error.name, message: value.error.message } : null,
     stdout_hex: value.stdout?.toString("hex") ?? null,
@@ -24,17 +25,46 @@ export function captureWindowsBoundaryB() {
         bin = join(root, "bin"),
         ps = win32.join(process.env.SystemRoot!, "System32/WindowsPowerShell/v1.0/powershell.exe"),
         label = mcp ? "exact-server" : "trajecta",
+        realSource = windowsWrapper(root, ps, mcp),
+        realEncoded = realSource.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/u)![1],
         expected = Buffer.from(`TRJ1|ERR|${reason}|END\r\n`),
         script = "[Console]::Out.Write('" + expected.toString("ascii") + "');[Environment]::Exit(0)",
-        source = windowsWrapper(root, ps, mcp).replace(
+        source = realSource.replace(
           /(-EncodedCommand )[A-Za-z0-9+/=]+/u,
           "$1" + Buffer.from(script, "utf16le").toString("base64"),
         ),
         encoded = source.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/u)![1],
         args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-        env = { ...isolatedEnv(root), TRAJECTA_WRAPPER_DIR: bin + win32.sep };
+        env = isolatedEnv(root);
       fs.mkdirSync(bin);
       const file = join(bin, mcp ? "trajecta-mcp.cmd" : "trajecta.cmd");
+      // Measure %~dp0 at the REAL wrapper path, without running PowerShell. Keep
+      // the exact UTF-16 value rather than inferring its spelling/case from Node.
+      const directoryReceipt = join(root, "wrapper-directory.utf16le");
+      fs.writeFileSync(
+        file,
+        `@echo off\r\nsetlocal DisableDelayedExpansion\r\nset "TRAJECTA_WRAPPER_DIR=%~dp0"\r\n"${process.execPath}" -e "require('node:fs').writeFileSync(process.argv[1],Buffer.from(process.env.TRAJECTA_WRAPPER_DIR,'utf16le'))" "${directoryReceipt}"\r\nexit /b %errorlevel%\r\n`,
+      );
+      const directoryProbe = spawnSync("cmd.exe", ["/d", "/q", "/c", file], { cwd: ROOT, env, timeout: 20000 });
+      if (directoryProbe.error || directoryProbe.status !== 0 || !fs.existsSync(directoryReceipt))
+        throw new Error(
+          "cannot measure the real wrapper's TRAJECTA_WRAPPER_DIR: " + JSON.stringify(receipt(directoryProbe)),
+        );
+      const wrapperDirectoryBytes = fs.readFileSync(directoryReceipt);
+      env.TRAJECTA_WRAPPER_DIR = wrapperDirectoryBytes.toString("utf16le");
+      fs.writeFileSync(file, realSource);
+      // Preserve the failing controlled-row fixture: neither current nor a node
+      // record exists. Real validation consequently stops at NOTINSTALLED even
+      // for the row whose STUB was instructed to emit NODEPATH. Do not invent a
+      // different Node/8.3 setup and call it the same failing fixture.
+      const fixture = {
+        current_exists: fs.existsSync(join(root, "current")),
+        node_record_exists: fs.existsSync(join(root, "0.5.0/node")),
+        current_hex: fs.existsSync(join(root, "current"))
+          ? fs.readFileSync(join(root, "current")).toString("hex")
+          : null,
+      };
+      const realDirect = spawnSync(ps, [...args.slice(0, -1), realEncoded], { cwd: ROOT, env, timeout: 20000 });
       fs.writeFileSync(file, source);
       // This is the SAME encoded command extracted from the failing fixture's wrapper,
       // run directly. Its host effects are diagnostic data, never a baseline exclusion.
@@ -79,6 +109,31 @@ export function captureWindowsBoundaryB() {
         count_hex: fs.existsSync(countFile) ? fs.readFileSync(countFile).toString("hex") : null,
         wire_hex: fs.existsSync(wireFile) ? fs.readFileSync(wireFile).toString("hex") : null,
       };
+      // A TEST-ONLY binary tee observes the host's complete stdout and forwards
+      // each Buffer unchanged into FOR /F. Keep the original invocation/result
+      // above as a control: a changed outcome means this instrumentation is not
+      // evidence for the original failing host-command path.
+      const teeScript = join(root, "wire-tee.cjs"),
+        rawWireFile = join(root, "parser-received-wire.bin"),
+        teeWrapper = join(bin, "wire-tee.cmd");
+      fs.writeFileSync(
+        teeScript,
+        "const fs=require('node:fs');const fd=fs.openSync(process.argv[2],'wx');" +
+          "process.stdin.on('data',b=>{fs.writeSync(fd,b);process.stdout.write(b)});" +
+          "process.stdin.on('end',()=>fs.closeSync(fd));\n",
+      );
+      const teeLine = commandLine.replace(
+        " 2^>nul`",
+        ` 2^>nul ^| "${process.execPath}" "${teeScript}" "${rawWireFile}"\``,
+      );
+      if (teeLine === commandLine) throw new Error("test tee did not match the original host command");
+      fs.writeFileSync(teeWrapper, source.replace(commandLine, teeLine));
+      const teeResult = spawnSync("cmd.exe", ["/d", "/q", "/c", teeWrapper, ...argv], {
+        cwd: ROOT,
+        env,
+        timeout: 20000,
+      });
+      const rawWire = fs.existsSync(rawWireFile) ? fs.readFileSync(rawWireFile) : null;
       // Isolate argument transport: a test-only host stand-in records argv[5]
       // (the Base64 payload) through direct cmd and the identical FOR command.
       // This never substitutes a host in production or any conformance assertion.
@@ -138,10 +193,40 @@ export function captureWindowsBoundaryB() {
         expected_record_hex: expected.toString("hex"),
         expected_message_hex: Buffer.from(message).toString("hex"),
         same_environment: true,
+        fixture,
+        wrapper_directory: {
+          measured_at: file,
+          cmd_percent_dp0_utf16le_hex: wrapperDirectoryBytes.toString("hex"),
+          direct_env_utf16le_hex: Buffer.from(env.TRAJECTA_WRAPPER_DIR, "utf16le").toString("hex"),
+          directory_probe: receipt(directoryProbe),
+        },
+        real_validator_direct: {
+          ...receipt(realDirect),
+          executable: ps,
+          encoded_command: realEncoded,
+          encoded_bytes_sha256: createHash("sha256").update(realEncoded, "ascii").digest("hex"),
+          fixture_expected_record: "TRJ1|ERR|NOTINSTALLED|END\\r\\n (current is absent)",
+        },
+        direct_kind: "controlled stub, not the real validator",
         direct: receipt(direct),
         wrapped: receipt(wrapped),
         file_parser_control: receipt(parsed),
         observed_capture: { ...capture, result: receipt(observed) },
+        controlled_frame_tee: {
+          intended_wire_hex: expected.toString("hex"),
+          directly_emitted_stub_wire_hex: direct.stdout?.toString("hex") ?? null,
+          parser_received_raw_hex: rawWire?.toString("hex") ?? null,
+          parser_received_raw_sha256: rawWire ? createHash("sha256").update(rawWire).digest("hex") : null,
+          wire_byte_for_byte_equal: rawWire?.equals(expected) ?? false,
+          exact_encoded_bytes_unchanged: teeLine.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/u)?.[1] === encoded,
+          original_host_command_line: commandLine,
+          tee_host_command_line: teeLine,
+          result: receipt(teeResult),
+          same_result_as_original:
+            teeResult.status === wrapped.status &&
+            teeResult.stdout?.equals(wrapped.stdout) &&
+            teeResult.stderr?.equals(wrapped.stderr),
+        },
         encoded_argument_probe: {
           limitation: "batch parameter expansion is not native-executable argv",
           expected_hex: Buffer.from(encoded + "\r\n").toString("hex"),
@@ -154,5 +239,19 @@ export function captureWindowsBoundaryB() {
         classification,
       });
     }
-  return { schema: "trajecta.windows-boundary-b/v1", node: process.versions.node, results };
+  return {
+    schema: "trajecta.windows-boundary-b/v1",
+    probe_revision: 2,
+    node: process.versions.node,
+    provenance: {
+      run_id: process.env.GITHUB_RUN_ID ?? null,
+      attempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+      checkout_sha: process.env.GITHUB_SHA ?? null,
+      image_os: process.env.ImageOS ?? null,
+      image_version: process.env.ImageVersion ?? null,
+      runner_os: process.env.RUNNER_OS ?? null,
+      runner_arch: process.env.RUNNER_ARCH ?? null,
+    },
+    results,
+  };
 }
