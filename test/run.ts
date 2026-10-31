@@ -45,6 +45,7 @@ run([
   "test/plugin-edges.test.ts",
   "test/shared-effects.test.ts",
   "test/mcp-wrapper.test.ts",
+  "test/windows-m5-remaining.test.ts",
 ]);
 run(["--test", ".isolation/cli-conformance.test.ts"]);
 const work = join(ROOT, ".isolation/upstream/work");
