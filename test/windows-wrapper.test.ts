@@ -290,3 +290,13 @@ test("Windows every refusal branch emits exact CRLF bytes with no trailing space
   }
   assert.deepEqual(failures, [], failures.join("\n"));
 });
+
+test("Windows B diagnostic captures raw direct encoded-command output and an exact-record parser control", async (t) => {
+  if (process.platform !== "win32") return t.skip("real Windows native diagnostic");
+  const { captureWindowsBoundaryB } = await import("./windows-boundary-b.ts");
+  const report = captureWindowsBoundaryB();
+  assert.equal(report.results.length, 4);
+  fs.mkdirSync(join(ROOT, "dist"), { recursive: true });
+  fs.writeFileSync(join(ROOT, "dist/windows-boundary-b.json"), JSON.stringify(report, null, 2) + "\n");
+  for (const row of report.results) t.diagnostic("BOUNDARY_B " + JSON.stringify(row));
+});
