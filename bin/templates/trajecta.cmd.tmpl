@@ -1,0 +1,92 @@
+@echo off
+setlocal EnableExtensions DisableDelayedExpansion
+set "TRAJECTA_WRAPPER_DIR=%~dp0"
+set "wire="
+set "count=0"
+for /f "usebackq delims= eol=`" %%L in (`"@@POWERSHELL@@" -NoLogo -NoProfile -NonInteractive -EncodedCommand @@ENCODED_VALIDATOR@@ 2^>nul`) do (
+set /a count+=1
+set "wire=%%L"
+)
+setlocal EnableDelayedExpansion
+if not "!count!"=="1" goto invalid
+set "a="
+set "b="
+set "c="
+set "d="
+set "e="
+set "f="
+for /f "tokens=1-5* delims=|" %%A in ("!wire!") do (
+set "a=%%A"
+set "b=%%B"
+set "c=%%C"
+set "d=%%D"
+set "e=%%E"
+set "f=%%F"
+)
+if not "!a!"=="TRJ1" goto invalid
+if not "!f!"=="" goto invalid
+if "!b!"=="OK" goto ok
+if "!b!"=="SENTINEL" goto sentinel
+if not "!b!"=="ERR" goto invalid
+if not "!d!"=="END" goto invalid
+if not "!e!"=="" goto invalid
+set "canon=TRJ1|ERR|!c!|END"
+if not "!wire!"=="!canon!" goto invalid
+if "!c!"=="NOTINSTALLED" goto missing
+if "!c!"=="DAMAGED" goto damaged
+if "!c!"=="NODE" goto node
+if "!c!"=="NODEPATH" goto nodepath
+goto invalid
+:sentinel
+if not "!c!"=="END" goto invalid
+if not "!d!!e!"=="" goto invalid
+if not "!wire!"=="TRJ1|SENTINEL|END" goto invalid
+endlocal
+if not "%~1"=="uninstall" goto resume
+if not "%~2"=="--status" goto resume
+if not "%3"=="" goto resume
+for %%R in ("%~dp0..") do echo trajecta: uninstall in progress at %%~fR
+echo trajecta is being uninstalled; resume with the command printed by 'trajecta uninstall', or run the installer bootstrap with --resume-uninstall
+exit /b 3
+:resume
+1>&2 echo trajecta is being uninstalled; resume with the command printed by 'trajecta uninstall', or run the installer bootstrap with --resume-uninstall
+exit /b 1
+:ok
+if not "!e!"=="END" goto invalid
+if "!c!"=="" goto invalid
+if "!d!"=="" goto invalid
+set "canon=TRJ1|OK|!c!|!d!|END"
+if not "!wire!"=="!canon!" goto invalid
+echo(!c!|findstr /r /x /c:"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" /c:"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*-[A-Za-z0-9.-][A-Za-z0-9.-]*" >nul
+if errorlevel 1 goto invalid
+for /f "eol=| delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:;\/._-+=,[]{}?@#$'`~ " %%X in ("!d!") do goto invalid
+if "!d:~1,2!"==":\" goto launch
+if "!d:~1,2!"==":/" goto launch
+if "!d:~0,2!"=="\\" goto launch
+goto invalid
+:launch
+endlocal & set "n=%d%" & set "v=%c%"
+"%n%" "%~dp0..\%v%\product\src\cli.ts" %*
+exit /b %errorlevel%
+:missing
+endlocal
+for %%R in ("%~dp0..") do 1>&2 <nul set /p "=trajecta: not installed at %%~fR; run the installer"
+1>&2 echo(
+exit /b 1
+:damaged
+endlocal
+for %%R in ("%~dp0..") do 1>&2 <nul set /p "=trajecta: installation at %%~fR is damaged; run the installer"
+1>&2 echo(
+exit /b 1
+:node
+endlocal
+1>&2 echo trajecta: need Node 22.19+ or 24 LTS
+exit /b 1
+:nodepath
+endlocal
+1>&2 echo trajecta: the recorded Node path has no usable short form on this system; reinstall with Node at an ASCII path
+exit /b 1
+:invalid
+endlocal
+1>&2 echo trajecta: cannot validate the installation ^(Windows PowerShell unavailable or blocked^)
+exit /b 1

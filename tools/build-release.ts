@@ -6,25 +6,29 @@ import { checkAuthority } from "./authority-lint.ts";
 import { verifyCompat } from "./compat.ts";
 import { engineFiles, filesIn, json, order, readLock, ROOT, sha } from "./engine-lock.ts";
 import { tarball, unpack, verifyManifest } from "./archive.ts";
+import { templateFiles } from "../product/src/templates.ts";
 
-export function build(mode: "foundation" | "release" = "foundation", fetch = true): Buffer {
+export function build(
+  mode: "foundation" | "release" = "foundation",
+  fetch = true,
+  templates = join(ROOT, "bin/templates"),
+): Buffer {
   checkAuthority();
   checkDispatcher();
   verifyCompat();
-  const bin: Record<string, Buffer> = {};
-  if (mode === "release") {
-    const required = ["trajecta", "trajecta-mcp", "trajecta.cmd", "trajecta-mcp.cmd"];
-    for (const name of required) {
-      const path = join(ROOT, "bin", name);
-      if (!fs.existsSync(path) || !fs.lstatSync(path).isFile() || !fs.statSync(path).size)
-        throw new Error(`release requires complete bin/: missing ${name}`);
-      bin["bin/" + name] = fs.readFileSync(path);
-    }
-  }
+  const bin = mode === "release" ? templateFiles(templates) : {};
   const lock = readLock(),
     pkg = JSON.parse(fs.readFileSync(join(ROOT, "product/package.json"), "utf8"));
+  // The hash-checked pre-verification bootstrap is distributed alongside the archive,
+  // never installed. §13.6 forbids a .ps1 under root; only runtime paths belong here.
+  const runtime: Record<string, Buffer> = {};
+  for (const directory of ["src", "assets"])
+    for (const [name, bytes] of Object.entries(filesIn(join(ROOT, "product", directory))))
+      runtime[directory + "/" + name] = bytes;
+  for (const name of ["package.json", "compat.json", "trajecta-extract.mjs"])
+    runtime[name] = fs.readFileSync(join(ROOT, "product", name));
   const product = Object.fromEntries(
-    Object.entries(filesIn(join(ROOT, "product"))).map(([p, b]) => ["product/" + p, b]),
+    Object.entries(mode === "release" ? runtime : filesIn(join(ROOT, "product"))).map(([p, b]) => ["product/" + p, b]),
   );
   const payload = { ...product, ...engineFiles(lock, fetch), ...bin, LICENSE: fs.readFileSync(join(ROOT, "LICENSE")) };
   const manifest = {
@@ -63,7 +67,7 @@ export function releaseMetadata(bytes: Buffer, version: string) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
-  const mode = args.includes("--release") ? "release" : "foundation";
+  const mode = args.includes("--foundation") ? "foundation" : "release";
   const at = args.indexOf("--out");
   const pkg = JSON.parse(fs.readFileSync(join(ROOT, "product/package.json"), "utf8"));
   const out = at >= 0 ? resolve(args[at + 1]) : join(ROOT, "dist", `trajecta-${pkg.version}.tar.gz`);

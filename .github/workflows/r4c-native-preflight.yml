@@ -1,0 +1,48 @@
+name: R4c Windows native contract
+on:
+  push:
+    branches: [feat/r4c-plugin]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify settled native wrapper contract (supersedes historical reader probe)
+        run: node --experimental-strip-types --test test/windows-wrapper.test.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-native-contract-node${{ matrix.node }}
+          path: dist/
+  remaining:
+    name: Remaining M5 (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify pinned engines without changing their lock
+        run: node --experimental-strip-types --input-type=module -e "import {vendor} from './tools/engine-lock.ts'; vendor(undefined, true)"
+      - name: Remaining real Windows M5 acceptance (STOPs are failures, not simulated passes)
+        shell: cmd
+        run: node --experimental-strip-types --test test/windows-m5-remaining.test.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-native-m5-node${{ matrix.node }}
+          path: dist/

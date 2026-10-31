@@ -47,7 +47,7 @@ test("all runtime and supplemental bytes authenticated; bad/missing/extra digest
   bad.engines.identity.supplemental!.files["trajecta_identity/profiles/example/profile.json"] = "0".repeat(64);
   assert.throws(() => engineFiles(bad, false), /digest mismatch/);
 });
-test("two builds exact, MANIFEST path set exact and self excluded; release refuses without wrappers", () => {
+test("two foundation builds exact and self excluded; release completeness still refuses missing templates", () => {
   const a = build("foundation", false),
     b = build("foundation", false);
   assert.deepEqual(a, b);
@@ -68,7 +68,7 @@ test("two builds exact, MANIFEST path set exact and self excluded; release refus
     if (change === "digest") damaged["product/src/cli.ts"] = Buffer.from("changed");
     assert.throws(() => verifyManifest(damaged), /mismatch/);
   }
-  assert.throws(() => build("release", false), /complete bin/);
+  assert.throws(() => build("release", false, join(temporary(), "missing-templates")), /complete bin/);
   process.stdout.write("M2 foundation tarball " + sha(a) + "\n");
 });
 test("lint and independent scan reject engine/sqlite bypasses including dynamic imports", () => {

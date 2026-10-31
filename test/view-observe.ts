@@ -11,6 +11,7 @@ if (
   fs.writeFileSync(process.env.TEST_PID_FILE! + ".launch", String(process.pid));
 }
 const entries = new Set(["identity", "work"].map((e) => pathToFileURL(enginePath(e as "identity" | "work")).href));
+for (const entry of JSON.parse(process.env.TEST_ENGINE_ENTRIES ?? "[]")) entries.add(pathToFileURL(entry).href);
 registerHooks({
   load(url, context, nextLoad) {
     const result = nextLoad(url, context);

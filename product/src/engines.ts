@@ -19,6 +19,49 @@ export async function prepareIdentityCli() {
 export async function workApi() {
   return import("../../engines/work/src/index.ts");
 }
+/** Frozen R2d filename rule, from the pinned identity public paths module. */
+export async function safeProfileName(profile: string): Promise<string> {
+  return (await import("../../engines/identity/src/paths.ts")).safeFsName(profile);
+}
+/** Product recipe records use the oracle's string/object canonical writer. No number inference. */
+export async function canonicalProductJson(value: unknown): Promise<Buffer> {
+  const { canonicalJson, orderedObject } = await import("../../engines/identity/src/encoding.ts");
+  function convert(item: any): any {
+    if (item === null || typeof item === "string" || typeof item === "boolean") return item;
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("invalid product recipe value");
+    return orderedObject(Object.entries(item).map(([key, value]) => [key, convert(value)]));
+  }
+  return Buffer.from(canonicalJson(convert(value)), "utf8");
+}
+/** Lossless ordered-entry parse, duplicate refusal, and byte-exact canonical recheck. */
+export async function parseCanonicalProductJson(bytes: Buffer): Promise<any> {
+  const { canonicalJson } = await import("../../engines/identity/src/encoding.ts");
+  const { parseLossless } = await import("../../engines/identity/src/json.ts");
+  const value = parseLossless(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  if (!Buffer.from(canonicalJson(value), "utf8").equals(bytes)) throw new Error("noncanonical product recipe");
+  function convert(item: any): any {
+    if (item === null || typeof item === "string" || typeof item === "boolean") return item;
+    if (!item || item.kind !== "object" || Array.isArray(item)) throw new Error("invalid product recipe value");
+    const out = Object.create(null);
+    for (const [key, value] of item.entries) {
+      if (Object.hasOwn(out, key)) throw new Error("duplicate product recipe field");
+      out[key] = convert(value);
+    }
+    return out;
+  }
+  return convert(value);
+}
+/** Version display only; preserve the lossless parser even for pretty plugin metadata. */
+export async function productMetadataVersion(bytes: Buffer): Promise<string> {
+  const { parseLossless, get, asString } = await import("../../engines/identity/src/json.ts");
+  return asString(get(parseLossless(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), "version"));
+}
+/** MCP has its own recipe boundary; the entries retain their own error envelopes. */
+export async function runEngineMcp(engine: Engine, argv: string[]): Promise<void> {
+  const entry = enginePath(engine, engine === "identity" ? "mcp.ts" : "mcp-server.ts");
+  process.argv = [process.execPath, entry, ...argv];
+  await import(pathToFileURL(entry).href);
+}
 /** Only verified version roots supplied by install/recovery may reach these public entries. */
 export async function identityInstall(versionRoot: string, argv: string[], env: Record<string, string | undefined>) {
   const cli = await import(pathToFileURL(versionRoot + "/engines/identity/src/cli.ts").href);
@@ -113,10 +156,11 @@ async function runStagedResume(staging, version, argv, token) {
 async function main() {
   if (!TRUST_ANCHOR) throw Error('no trusted release key configured');
   const argv=process.argv.slice(1), values={};
-  let resume=false;
+  let resume=false,noUserBin=false;
   for(let i=0;i<argv.length;) {
     if(argv[i]==='--resume-uninstall') {resume=true;i++;continue;}
-    if(!['--root','--release','--db','--profile','--work-root'].includes(argv[i]) || argv[i+1]===undefined)
+    if(argv[i]==='--no-user-bin') {noUserBin=true;i++;continue;}
+    if(!['--root','--release','--db','--profile','--work-root','--user-bin'].includes(argv[i]) || argv[i+1]===undefined)
       throw Error('invalid bootstrap option: '+argv[i]);
     values[argv[i]]=argv[i+1];i+=2;
   }
@@ -150,7 +194,8 @@ async function main() {
     checked.extract();
     const args=['--root',root,'--release',releaseDir];
     if(!resume)args.push('--staged',staging,'--lock-token',held.token);
-    for(const name of ['--db','--profile','--work-root']) if(values[name]!==undefined) args.push(name,values[name]);
+    for(const name of ['--db','--profile','--work-root','--user-bin']) if(values[name]!==undefined) args.push(name,values[name]);
+    if(noUserBin)args.push('--no-user-bin');
     return resume ? await runStagedResume(staging,metadata.version,args,held.token) : await runStagedInstall(staging,metadata.version,args);
   } finally {
     if(staging && fs.existsSync(staging)) fs.rmSync(staging,{recursive:true});
