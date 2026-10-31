@@ -217,3 +217,52 @@ test(
     assert.match(refused.stderr, /not installed at/);
   },
 );
+
+test("install retry resumes old-generation retirement before recording an already committed plugin effect", () => {
+  for (const point of ["plugin:commit:after", "plugin:retire:after-unlink:1:.planned.json"]) {
+    const key = testKey(),
+      f = signedFixture(key),
+      next = signedFixture(key, "0.5.1"),
+      root = join(f.root, "install");
+    let r = run(f, "install", ["--profile", "example", "--no-user-bin"]);
+    assert.equal(r.status, 0, r.stderr);
+    const retry = (extra = {}) =>
+      spawnSync(
+        process.execPath,
+        [
+          CLI,
+          "install",
+          "--root",
+          root,
+          "--release",
+          next.release,
+          "--db",
+          join(f.root, "identity/example.sqlite3"),
+          "--profile",
+          "example",
+          "--no-user-bin",
+        ],
+        { env: { ...f.env, ...extra }, encoding: "utf8", timeout: 30000 },
+      );
+    r = retry({ TEST_KILL_AT: point });
+    assert.notEqual(r.status, 0, point);
+    const old = () =>
+      Object.values(ledger(root).entries).filter(
+        (entry: any) => entry.plugin === "trajecta-example" && entry.generation === 1,
+      );
+    assert.equal(old().length, 4, point);
+    r = retry();
+    assert.equal(r.status, 0, point + ": " + r.stderr);
+    assert.equal(old().length, 0, "retry must finish retirement before declaring the install effect complete");
+    assert(!fs.existsSync(join(root, "plugins/trajecta-example/g1")));
+    assert.equal(
+      Object.values(ledger(root).entries).filter(
+        (entry: any) => entry.plugin === "trajecta-example" && entry.generation === 2,
+      ).length,
+      4,
+    );
+    r = run(f, "uninstall");
+    assert.equal(r.status, 0, r.stderr);
+    assert(!fs.existsSync(root));
+  }
+});

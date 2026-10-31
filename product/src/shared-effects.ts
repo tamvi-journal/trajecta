@@ -9,6 +9,7 @@ import {
   preparedFromBytes,
   buildGeneration,
   currentGeneration,
+  resumePluginRetirement,
 } from "./plugin-generations.ts";
 import { atomic, beneath, digest, jsonBytes, regular, safeRoot } from "./install-fs.ts";
 import { checkpoint } from "./checkpoint.ts";
@@ -266,12 +267,12 @@ export async function publishShared(root: string, folder: string, plan: SharedPl
         fs.readFileSync(join(folder, p.archiveSource)),
       );
       const current = await currentGeneration(root, p.name, data);
-      const result =
+      const matches =
         current &&
         current.recipe.plugin_sha256 === p.archiveSha &&
-        digest(await (await import("./engines.ts")).canonicalProductJson(current.recipe)) === p.recipeSha
-          ? current
-          : await buildGeneration(root, prepared, data);
+        digest(await (await import("./engines.ts")).canonicalProductJson(current.recipe)) === p.recipeSha;
+      const result = matches ? current : await buildGeneration(root, prepared, data);
+      if (matches) await resumePluginRetirement(root, p.name, data);
       data.effects[effect] = {
         plugin: p.name,
         generation: result.generation,

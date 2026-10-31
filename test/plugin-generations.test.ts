@@ -261,3 +261,32 @@ test("plugin ownership receipts must stay in shared scope before a reader or wri
     f.close();
   }
 });
+
+test("full uninstall never follows a swapped ancestor after generation receipts have been removed", async () => {
+  const f = await fixture(),
+    outside = temporary();
+  try {
+    await subject.buildGeneration(f.root, await f.prepare(), f.data);
+    fs.writeFileSync(join(f.root, "current"), "uninstalling\n");
+    setGate((point) => {
+      if (point === "plugin:remove-dir:before:plugins/trajecta-example") throw Error("crash before parent cleanup");
+    });
+    await assert.rejects(subject.removeAllPlugins(f.root, f.data), /crash before parent cleanup/);
+    setGate();
+    assert.equal(records(f.root, 1).length, 0);
+    fs.renameSync(join(f.root, "plugins"), join(outside, "plugins"));
+    fs.symlinkSync(
+      join(outside, "plugins"),
+      join(f.root, "plugins"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const external = tree(outside),
+      before = fs.readFileSync(join(f.root, "owned.json"));
+    const retained = await subject.removeAllPlugins(f.root, f.data);
+    assert.deepEqual(tree(outside), external, "an unchanged leaf inode cannot authorize traversing a replaced parent");
+    assert.deepEqual(fs.readFileSync(join(f.root, "owned.json")), before);
+    assert(retained.includes(join(f.root, "plugins")));
+  } finally {
+    f.close();
+  }
+});

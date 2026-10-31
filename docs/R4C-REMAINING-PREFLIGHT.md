@@ -1,4 +1,9 @@
-# R4c remaining contract preflight
+# R4c historical S4/S5 contract preflight
+
+**Settled by identity #50, merge 4459ead02a093edc8e2a9b7213e41de1e0d41a8d.**
+The reproduction below is historical. The six portable templates and explicit
+`--db` recipe are now implemented. See [settlement implementation](R4C-SETTLEMENT-50.md)
+for the current source/evidence boundary; native certification remains pending.
 
 Contract read: identity `dbcaaf66015cc65800fdd871ea20e5d352e08300`, R4 §13.3 and §13.5 in full, with §§2.2, 5.2, 5.3 and 13.1–13.4 still binding. The earlier Windows byte-reader STOP is **settled** by identity #49. No weaker reader is proposed.
 

@@ -41,3 +41,11 @@ engine startup, and real console Ctrl-C. No Windows limitation is declared
 without observing it. Linux/macOS CI matrix acceptance also remains pending.
 Final exact-head local counts and run IDs belong in the PR report, after a
 clean frozen-head run; earlier working-tree runs are regression observations.
+
+Fresh whole-branch source review at c0b7d0e found two implementation defects:
+ancestor validation during parent-directory uninstall cleanup, and retirement
+skipped on an install retry whose new generation already committed. Both have
+failing-then-passing regressions. Cleanup now verifies the full owned directory
+chain, and the matching-current install retry resumes retirement under its
+existing lock before recording its completion. Public process-kill regressions
+also cover all parent-directory cleanup boundaries and the moved-ancestor case.

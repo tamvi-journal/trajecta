@@ -428,12 +428,19 @@ export async function buildGeneration(root: string, prepared: PreparedPlugin, da
   if (!current) throw new Error("new committed plugin is invalid");
   if (state.leftovers.length)
     process.stdout.write("trajecta: retained uncommitted plugin generations: " + state.leftovers.join(", ") + "\n");
-  for (const old of groups(name, data).committed.filter((item) => item.generation < n)) {
+  await resumePluginRetirement(root, name, data);
+  process.stdout.write(current.path + "\n");
+  return current;
+}
+/** Install retries may already have committed the new generation before their effect receipt. */
+export async function resumePluginRetirement(root: string, name: string, data: Ledger): Promise<void> {
+  assertOwner(root, data);
+  const current = await currentGeneration(root, name, data);
+  if (!current) throw new PluginModified(root, name, [highWater(name, data)?.base ?? `plugins/${name}`]);
+  for (const old of groups(name, data).committed.filter((item) => item.generation < current.generation)) {
     const retained = removeGeneration(root, old, data);
     if (retained.length) process.stdout.write("trajecta: retained " + retained.join(", ") + "\n");
   }
-  process.stdout.write(current.path + "\n");
-  return current;
 }
 /** Future update's narrow entry: an invalid/absent current causes no write or cleanup. */
 export async function rebuildCurrent(root: string, name: string, data: Ledger): Promise<Current | undefined> {
@@ -475,7 +482,14 @@ export async function removeAllPlugins(root: string, data: Ledger): Promise<stri
         .map((entry) => (entry as any).plugin as string),
     ),
     remaining: string[] = [];
-  if (lstat(join(root, "plugins")) && data.entries.plugins?.kind !== "dir") return [join(root, "plugins")];
+  if (lstat(join(root, "plugins"))) {
+    try {
+      dir(root, "plugins", data);
+    } catch (error) {
+      if (error instanceof PluginDirectoryError) return [join(root, "plugins")];
+      throw error;
+    }
+  }
   for (const name of names) {
     for (const item of groups(name, data).committed) remaining.push(...removeGeneration(root, item, data));
     for (const item of groups(name, data).tombstones) {
@@ -491,12 +505,13 @@ export async function removeAllPlugins(root: string, data: Ledger): Promise<stri
     if (lstat(path)) {
       try {
         if (receipt.kind !== "dir") throw new Error();
-        real(path, receipt);
+        dir(root, key, data);
         if (fs.readdirSync(path).length) {
           remaining.push(path);
           continue;
         }
         checkpoint("plugin:remove-dir:before:" + key);
+        dir(root, key, data);
         fs.rmdirSync(path);
         checkpoint("plugin:remove-dir:after:" + key);
       } catch (error) {

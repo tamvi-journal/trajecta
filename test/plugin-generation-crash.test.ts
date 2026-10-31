@@ -137,3 +137,31 @@ test("a foreign replacement after a creation kill is retained byte-for-byte thro
   assert.deepEqual(fs.readFileSync(path), before);
   assert.equal(f.count(1), 0);
 });
+
+test("full-uninstall parent-directory kills converge and a moved ancestor is retained without external deletion", () => {
+  for (const point of ["plugins/trajecta-example", "plugins"].flatMap((key) => [
+    "plugin:remove-dir:before:" + key,
+    "plugin:remove-dir:after:" + key,
+  ])) {
+    const f = fixture();
+    assert.equal(f.build().status, 0);
+    let r = f.run("uninstall", [], { TEST_KILL_AT: point });
+    assert.notEqual(r.status, 0, point);
+    r = f.run("uninstall", ["--resume"]);
+    assert.equal(r.status, 0, point + ": " + r.stderr);
+    assert(!fs.existsSync(f.root), point);
+  }
+  const f = fixture();
+  assert.equal(f.build().status, 0);
+  let r = f.run("uninstall", [], { TEST_KILL_AT: "plugin:remove-dir:before:plugins/trajecta-example" });
+  assert.notEqual(r.status, 0);
+  const outside = join(f.f.root, "owner-moved-plugins");
+  fs.renameSync(join(f.root, "plugins"), outside);
+  fs.symlinkSync(outside, join(f.root, "plugins"), process.platform === "win32" ? "junction" : "dir");
+  const external = tree(outside);
+  r = f.run("uninstall", ["--resume"]);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /retained/);
+  assert.deepEqual(tree(outside), external);
+  assert(fs.existsSync(join(outside, "trajecta-example")));
+});
