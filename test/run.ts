@@ -37,6 +37,7 @@ run([
   "test/install-authority.test.ts",
   "test/bootstrap.test.ts",
   "test/extractor.test.ts",
+  "test/templates.test.ts",
   "test/shared-effects.test.ts",
   "test/mcp-wrapper.test.ts",
 ]);
@@ -46,8 +47,8 @@ const tests = readdirSync(join(work, "test"))
   .filter((name) => name.endsWith(".test.ts"))
   .sort();
 run(["--import", "./test/work-gate.ts", "--test", ...tests.map((name) => join(work, "test", name))]);
-const a = build("foundation", false),
-  b = build("foundation", false);
+const a = build("release", false),
+  b = build("release", false);
 if (!a.equals(b)) throw new Error("two final builds differ");
 mkdirSync(join(ROOT, "dist"), { recursive: true });
 const version = JSON.parse(readFileSync(join(ROOT, "product/package.json"), "utf8")).version;
