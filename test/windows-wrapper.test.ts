@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { join, win32 } from "node:path";
+import { join, win32, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { ROOT, temporary, isolatedEnv, tree } from "./support.ts";
-import { HOST_FLAGS, NOOP_ENCODED, prewarmWindowsHost } from "./windows-host-a.ts";
+import { HOST_FLAGS, NOOP_ENCODED, coldHostInventory, prewarmWindowsHost } from "./windows-host-a.ts";
+import { encodePowerShell } from "../product/src/templates.ts";
 
 const path = new URL("../product/src/wrappers.ts", import.meta.url);
 const subject = fs.existsSync(path) ? await import(path.href) : null;
@@ -13,15 +14,6 @@ const systemPS = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe
 test("Windows PowerShell cold-start inventory is closed and typed; the second start is byte-stable", (t) => {
   if (process.platform !== "win32") return t.skip("real Windows host characterization");
   const ps = win32.join(process.env.SystemRoot!, "System32/WindowsPowerShell/v1.0/powershell.exe");
-  const allowed: Record<string, string> = {
-    AppData: "dir",
-    "AppData/Local": "dir",
-    "AppData/Local/Microsoft": "dir",
-    "AppData/Local/Microsoft/Windows": "dir",
-    "AppData/Local/Microsoft/Windows/PowerShell": "dir",
-    "AppData/Local/Microsoft/Windows/PowerShell/StartupProfileData-NonInteractive": "file",
-    "AppData/Roaming": "dir",
-  };
   const observations = [false, true].map((precreated) => {
     const root = temporary(),
       env = isolatedEnv(root);
@@ -46,7 +38,16 @@ test("Windows PowerShell cold-start inventory is closed and typed; the second st
         .filter((key) => fs.lstatSync(join(root, key)).isFile())
         .map((key) => [key, { sha256: second[key], bytes_hex: fs.readFileSync(join(root, key)).toString("hex") }]),
     );
-    return { precreated, root, before, first, entries, second, second_files: secondFiles };
+    return {
+      precreated,
+      root,
+      roots: { USERPROFILE: env.USERPROFILE, LOCALAPPDATA: env.LOCALAPPDATA },
+      before,
+      first,
+      entries,
+      second,
+      second_files: secondFiles,
+    };
   });
   const report = {
     schema: "trajecta.windows-host-a/v1",
@@ -64,17 +65,40 @@ test("Windows PowerShell cold-start inventory is closed and typed; the second st
   fs.writeFileSync(join(ROOT, "dist/windows-host-a.json"), JSON.stringify(report, null, 2) + "\n");
   t.diagnostic("HOST_A " + JSON.stringify(report));
   for (const row of observations) {
+    const allowed = coldHostInventory(row.roots);
     for (const [key, value] of Object.entries(row.before))
       assert.equal(row.first[key], value, "pre-existing entry changed: " + key);
     for (const entry of row.entries)
       if (!entry.was_present)
-        assert.equal(entry.kind, allowed[entry.path], "new entry outside closed typed inventory: " + entry.path);
+        assert.equal(
+          entry.kind,
+          allowed.get(resolve(row.root, entry.path)),
+          "new entry outside closed typed inventory: " + entry.path,
+        );
     assert.deepEqual(
       row.second,
       row.first,
       "STOP: host rewrote the second-start tree; both bytes/SHA in windows-host-a.json",
     );
   }
+});
+
+test("§13.8 host inventory is rooted in the supplied env and never permits local cache files", () => {
+  const home = temporary(),
+    local = join(home, "different-local-root"),
+    allowed = coldHostInventory({ USERPROFILE: home, LOCALAPPDATA: local });
+  assert.equal(allowed.size, 11);
+  assert.equal(
+    allowed.get(join(home, "AppData/Local/Microsoft/Windows/PowerShell/StartupProfileData-NonInteractive")),
+    "file",
+  );
+  for (const name of ["", "Microsoft", "Microsoft/Windows", "Microsoft/Windows/Caches"]) {
+    assert.equal(allowed.get(join(local, name)), "dir");
+    assert.notEqual(allowed.get(join(local, name)), "file");
+  }
+  assert(!allowed.has(join(home, "local")), "a hard-coded isolation layout must not be accepted");
+  assert(!allowed.has(join(local, "Microsoft/Windows/Caches/extra")));
+  assert(!allowed.has(join(local, "unlisted")));
 });
 
 test("Windows encoded validator fits the 240-character non-ASCII root without truncation", () => {
@@ -176,13 +200,7 @@ test("Windows cmd canonical reconstruction rejects every observable malformed fr
     const args = mcp ? ["configured-label", "--engine", "identity", "--"] : ["version"];
     const stub = (record: string) => {
       const script = "[Console]::Out.Write('" + record.replaceAll("'", "''") + "');[Environment]::Exit(0)";
-      fs.writeFileSync(
-        file,
-        template.replace(
-          /(-EncodedCommand )[A-Za-z0-9+/=]+/u,
-          "$1" + Buffer.from(script, "utf16le").toString("base64"),
-        ),
-      );
+      fs.writeFileSync(file, template.replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + encodePowerShell(script)));
     };
     for (const record of malformed) {
       stub(record);
@@ -288,10 +306,7 @@ test("Windows all pointer rows precede Node; status has exact arity; moved cmd a
     assert.match(r.stderr, /is damaged/);
     const source = Buffer.from(template.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/u)![1], "base64").toString("utf16le");
     const clm = "$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage';" + source;
-    fs.writeFileSync(
-      file,
-      template.replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + Buffer.from(clm, "utf16le").toString("base64")),
-    );
+    fs.writeFileSync(file, template.replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + encodePowerShell(clm)));
     r = run();
     assert.equal(r.status, 1);
     assert.equal(
@@ -340,7 +355,7 @@ test("Windows every refusal branch emits exact CRLF bytes with no trailing space
         file,
         subject
           .windowsWrapper(root, ps, mcp)
-          .replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + Buffer.from(script, "utf16le").toString("base64")),
+          .replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + encodePowerShell(script)),
       );
       prewarmWindowsHost(ps, isolatedEnv(root));
       const before = tree(root);
@@ -391,5 +406,27 @@ test("Windows B bisection records payload sizes, command shapes and the identica
   for (const row of [...report.sizes.map((r) => r.observation), ...report.noop_shapes, ...report.real_shapes]) {
     assert.equal(row.result.error, null, "diagnostic process failed: " + JSON.stringify(row));
     if (row.shape !== "outside-for") assert.notEqual(row.count, null, "FOR capture absent: " + JSON.stringify(row));
+  }
+});
+
+test("§13.8 native cmd records and exact outcomes cover every original root padding class", async (t) => {
+  if (process.platform !== "win32") return t.skip("real Windows native padding acceptance");
+  const { capturePaddingM5 } = await import("./windows-padding-m5.ts");
+  const report = capturePaddingM5();
+  fs.mkdirSync(join(ROOT, "dist"), { recursive: true });
+  fs.writeFileSync(join(ROOT, "dist/windows-padding-m5.json"), JSON.stringify(report, null, 2) + "\n");
+  for (const row of report.results) t.diagnostic("PADDING_M5 " + JSON.stringify(row));
+  assert.equal(report.results.length, 18);
+  for (const row of report.results) {
+    const context = `${row.original_root_padding}/${row.mcp}/${row.kind}`;
+    assert.doesNotMatch(row.encoded, /[=,;]/u, context);
+    assert.equal(row.count_hex, "310d0a", context);
+    assert.equal(row.first_line_hex, row.expected_record_hex, context);
+    assert.equal(row.plain.error, null, context);
+    assert.equal(row.plain.status, row.expected_status, context);
+    assert.equal(row.plain.stdout_hex, row.expected_stdout_hex, context);
+    assert.equal(row.plain.stderr_hex, row.expected_stderr_hex, context);
+    assert.deepEqual(row.observed, row.plain, context);
+    assert.equal(row.tree_unchanged, true, context + ": full tree changed");
   }
 });

@@ -17,6 +17,13 @@ export class TemplateError extends Error {
     this.name = "TemplateError";
   }
 }
+/** §13.8: one encoder for production validators and test/pre-warm payloads. */
+export function encodePowerShell(source: string): string {
+  while (Buffer.byteLength(source, "utf16le") % 3 !== 0) source += " ";
+  const encoded = Buffer.from(source, "utf16le").toString("base64");
+  if (/[=,;]/u.test(encoded)) throw new TemplateError("encoded validator contains a cmd token delimiter");
+  return encoded;
+}
 export function shQuote(value: string): string {
   if (value.includes("\0")) throw new TemplateError("shell path contains NUL");
   return "'" + value.replaceAll("'", "'\\''") + "'";
@@ -52,7 +59,7 @@ export function renderTemplate(
       throw new TemplateError("system PowerShell path is not absolute cmd-safe ASCII");
     values["@@POWERSHELL@@"] = input.powershell;
     if (input.validator === undefined) throw new TemplateError("missing rendered validator");
-    values["@@ENCODED_VALIDATOR@@"] = Buffer.from(input.validator, "utf16le").toString("base64");
+    values["@@ENCODED_VALIDATOR@@"] = encodePowerShell(input.validator);
   }
   // Only the original literal segments and tokens are visited; values are never rescanned.
   const output = parts.map((part, i) => (i % 2 === 0 ? part : values[part as Token]!)).join("");

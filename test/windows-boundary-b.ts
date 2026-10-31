@@ -5,6 +5,7 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { temporary, isolatedEnv, ROOT } from "./support.ts";
 import { windowsWrapper } from "../product/src/wrappers.ts";
+import { encodePowerShell } from "../product/src/templates.ts";
 
 function receipt(value: SpawnSyncReturns<Buffer>) {
   return {
@@ -29,10 +30,7 @@ export function captureWindowsBoundaryB() {
         realEncoded = realSource.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/u)![1],
         expected = Buffer.from(`TRJ1|ERR|${reason}|END\r\n`),
         script = "[Console]::Out.Write('" + expected.toString("ascii") + "');[Environment]::Exit(0)",
-        source = realSource.replace(
-          /(-EncodedCommand )[A-Za-z0-9+/=]+/u,
-          "$1" + Buffer.from(script, "utf16le").toString("base64"),
-        ),
+        source = realSource.replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + encodePowerShell(script)),
         encoded = source.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/u)![1],
         args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
         env = isolatedEnv(root);
