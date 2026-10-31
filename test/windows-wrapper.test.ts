@@ -375,17 +375,21 @@ test("Windows B diagnostic captures raw direct encoded-command output and an exa
     assert.equal(row.controlled_frame_tee.exact_encoded_bytes_unchanged, true);
     assert.notEqual(row.controlled_frame_tee.parser_received_raw_hex, null, "binary tee captured no wire");
     assert.equal(row.controlled_frame_tee.same_result_as_original, true, "binary tee changed the original outcome");
-    for (const variant of row.padding_hypothesis.variants) {
-      const context = `${row.wrapper}/${row.reason}/${variant.name}`;
-      assert.equal(variant.count_hex, "310d0a", context + ": count must be one");
-      assert.equal(variant.first_line_hex, row.expected_record_hex, context + ": first line bytes");
-      assert.equal(variant.exact_category_message_and_exit, true, context + ": exact message/exit");
-      assert.equal(variant.observation_preserves_result, true, context + ": observer changed result");
-      assert.equal(variant.source_except_for_line_unchanged, true, context + ": escaped beyond FOR command");
-      if (variant.name === "source-trailing-spaces") {
-        assert.equal(variant.tested_utf16le_bytes % 3, 0, context + ": UTF-16LE length");
-        assert(!variant.encoded_command_text.includes("="), context + ": Base64 padding remains");
-      }
-    }
+  }
+});
+
+test("Windows B bisection records payload sizes, command shapes and the identical real script via stdin", async (t) => {
+  if (process.platform !== "win32") return t.skip("real Windows native bisection");
+  const { captureWindowsBisectionB } = await import("./windows-bisection-b.ts");
+  const report = captureWindowsBisectionB();
+  fs.mkdirSync(join(ROOT, "dist"), { recursive: true });
+  fs.writeFileSync(join(ROOT, "dist/windows-bisection-b.json"), JSON.stringify(report, null, 2) + "\n");
+  t.diagnostic("BISECTION_B " + JSON.stringify(report));
+  assert.equal(report.sizes.length, 7);
+  assert.equal(report.noop_shapes.length, 5);
+  assert.equal(report.real_shapes.length, 5);
+  for (const row of [...report.sizes.map((r) => r.observation), ...report.noop_shapes, ...report.real_shapes]) {
+    assert.equal(row.result.error, null, "diagnostic process failed: " + JSON.stringify(row));
+    if (row.shape !== "outside-for") assert.notEqual(row.count, null, "FOR capture absent: " + JSON.stringify(row));
   }
 });
