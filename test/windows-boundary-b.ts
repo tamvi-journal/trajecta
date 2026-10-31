@@ -79,6 +79,30 @@ export function captureWindowsBoundaryB() {
         count_hex: fs.existsSync(countFile) ? fs.readFileSync(countFile).toString("hex") : null,
         wire_hex: fs.existsSync(wireFile) ? fs.readFileSync(wireFile).toString("hex") : null,
       };
+      // Isolate argument transport: a test-only host stand-in records argv[5]
+      // (the Base64 payload) through direct cmd and the identical FOR command.
+      // This never substitutes a host in production or any conformance assertion.
+      const argHost = join(bin, "argument-observer.cmd"),
+        argFile = join(root, "encoded-argument.bin"),
+        argWrapper = join(bin, "argument-wrapper.cmd");
+      fs.writeFileSync(argHost, `@echo off\r\n1>"${argFile}" echo(%~5\r\nexit /b 0\r\n`);
+      const argDirect = spawnSync("cmd.exe", ["/d", "/q", "/c", argHost, ...args], {
+        cwd: ROOT,
+        env,
+        timeout: 20000,
+      });
+      const directArg = fs.existsSync(argFile) ? fs.readFileSync(argFile).toString("hex") : null;
+      if (fs.existsSync(argFile)) fs.unlinkSync(argFile);
+      fs.writeFileSync(
+        argWrapper,
+        source.replace(ps, () => argHost),
+      );
+      const argViaFor = spawnSync("cmd.exe", ["/d", "/q", "/c", argWrapper, ...argv], {
+        cwd: ROOT,
+        env,
+        timeout: 20000,
+      });
+      const forArg = fs.existsSync(argFile) ? fs.readFileSync(argFile).toString("hex") : null;
       const message =
         reason === "NOTINSTALLED"
           ? `${label}: not installed at ${root}; run the installer\r\n`
@@ -114,6 +138,13 @@ export function captureWindowsBoundaryB() {
         wrapped: receipt(wrapped),
         file_parser_control: receipt(parsed),
         observed_capture: { ...capture, result: receipt(observed) },
+        encoded_argument_probe: {
+          expected_hex: Buffer.from(encoded + "\r\n").toString("hex"),
+          direct_hex: directArg,
+          via_for_hex: forArg,
+          direct_result: receipt(argDirect),
+          via_for_result: receipt(argViaFor),
+        },
         file_parser_record_sha256: createHash("sha256").update(fs.readFileSync(frame)).digest("hex"),
         classification,
       });
