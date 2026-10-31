@@ -444,6 +444,7 @@ test("Windows every template line parses and forbidden OK node paths never launc
     assert.deepEqual(row.traced, row.plain, context + ": trace changed stdout/stderr/exit");
     assert.equal(!!row.plain_marker, row.expected_launched, context);
     assert.equal(!!row.traced_marker, row.expected_launched, context);
+    if (row.direct_command) assert.deepEqual(row.plain, row.direct_command, context + ": exact direct CMD parity");
     if (row.single_record)
       assert.equal(row.received_wire_hex, row.wire_hex, context + ": actual canonical input bytes");
     if (row.legacy) {

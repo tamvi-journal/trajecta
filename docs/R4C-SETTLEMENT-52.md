@@ -90,7 +90,7 @@ or quoted IF options string was found. The native smoke gates enumerate
 every FOR/IF line and require every nonempty template line and every named
 branch to execute in a test copy, with byte-identical plain/traced outcomes.
 The cases include all refusal/sentinel/status branches, all three absolute
-path prefixes, invalid version/relative paths, a space-bearing valid Node
+path-prefix branches, invalid version/relative paths, a space-bearing valid Node
 alias and nonzero child exit forwarding.
 
 Controlled canonical OK records point to real isolated copies of the
@@ -100,3 +100,12 @@ preload marker absent. Captured input bytes must match the emitted record.
 A historical test-only old-options control demonstrates the dead guard
 falling through and starting the forbidden alias. Trace writes and these
 markers are harness effects only. The 18-row M5 test is unchanged.
+
+In run `41194504122` at `7e02ec0` all 18 M5 rows per runtime and all six
+forbidden-character refusals passed, and all nonempty lines/labels were
+visited. The new smoke's only failure was its invented success expectation
+for a `\\?\` executable alias: CMD returned exit 3 and "The system cannot
+find the path specified." That fixture now compares the wrapper's exact
+stdout/stderr/exit/launch marker to the identical direct CMD command.
+It retains the namespace-branch exercise and permits no output difference;
+drive/forward-slash real OK cases still require exit zero and empty stderr.

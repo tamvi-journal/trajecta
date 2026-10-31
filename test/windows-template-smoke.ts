@@ -64,6 +64,7 @@ export function captureTemplateSmoke() {
       launched?: boolean;
       childExit?: number;
       legacy?: boolean;
+      directNode?: string;
     };
     const rows: Row[] = [
       { id: "zero-records", wire: "" },
@@ -108,7 +109,6 @@ export function captureTemplateSmoke() {
       ...[
         ["drive", aliases.space],
         ["forward", aliases.space.replaceAll("\\", "/")],
-        ["device", "\\\\?\\" + aliases.space],
       ].map(([kind, node]) => ({
         id: "ok-" + kind,
         wire: ok(node),
@@ -116,6 +116,9 @@ export function captureTemplateSmoke() {
         stderr: "",
         launched: true,
       })),
+      // CMD's device-namespace executable lookup can fail even when the file exists.
+      // Compare to the identical direct CMD invocation; do not invent success.
+      { id: "device-command-parity", wire: ok("\\\\?\\" + aliases.space), directNode: "\\\\?\\" + aliases.space },
       { id: "ok-child-exit", wire: ok(aliases.space), status: 7, stderr: "", launched: true, childExit: 7 },
       ...["(", ")", "&"].map((char) => ({ id: "forbidden-" + char, wire: ok(aliases[char]) })),
       // RED witness for this regression: the old options must run the forbidden alias.
@@ -136,6 +139,24 @@ export function captureTemplateSmoke() {
           stderr_hex: r.stderr?.toString("hex") ?? null,
         });
       if (fs.existsSync(marker)) fs.unlinkSync(marker);
+      let direct: ReturnType<typeof receipt> | null = null,
+        directLaunched = false;
+      if (row.directNode) {
+        if (!fs.existsSync(row.directNode)) throw new Error("direct namespace fixture does not exist");
+        fs.writeFileSync(
+          file,
+          '@echo off\n"' +
+            row.directNode +
+            '" "' +
+            join(version, "product/src/cli.ts") +
+            '" ' +
+            (mcp ? "mcp " : "") +
+            "%*\nexit /b %errorlevel%\n",
+        );
+        direct = receipt(run());
+        directLaunched = fs.existsSync(marker);
+        if (fs.existsSync(marker)) fs.unlinkSync(marker);
+      }
       fs.writeFileSync(file, source);
       const plain = run(),
         plainMarker = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : null;
@@ -164,12 +185,15 @@ export function captureTemplateSmoke() {
         id: row.id,
         wire_hex: Buffer.from(row.wire).toString("hex"),
         legacy: row.legacy ?? false,
-        expected_status: row.status ?? 1,
-        expected_launched: row.launched ?? false,
-        expected_stdout_hex: Buffer.from(
-          row.stdout ?? (row.launched ? JSON.stringify(mcp ? ["mcp", ...args] : args) + "\n" : ""),
-        ).toString("hex"),
-        expected_stderr_hex: Buffer.from(row.stderr ?? invalid).toString("hex"),
+        expected_status: direct ? direct.status : (row.status ?? 1),
+        expected_launched: direct ? directLaunched : (row.launched ?? false),
+        expected_stdout_hex: direct
+          ? direct.stdout_hex
+          : Buffer.from(
+              row.stdout ?? (row.launched ? JSON.stringify(mcp ? ["mcp", ...args] : args) + "\n" : ""),
+            ).toString("hex"),
+        expected_stderr_hex: direct ? direct.stderr_hex : Buffer.from(row.stderr ?? invalid).toString("hex"),
+        direct_command: direct,
         single_record: row.wire.split("\r\n").filter(Boolean).length === 1,
         received_wire_hex: fs.existsSync(wireReceipt) ? fs.readFileSync(wireReceipt).toString("hex") : null,
         plain: receipt(plain),
