@@ -16,6 +16,20 @@ function receipt(value: SpawnSyncReturns<Buffer>) {
     stderr_hex: value.stderr?.toString("hex") ?? null,
   };
 }
+function encodingAudit(name: string, script: string) {
+  const bytes = Buffer.from(script, "utf16le"),
+    encoded = bytes.toString("base64");
+  return {
+    name,
+    utf16le_bytes: bytes.length,
+    base64_padding: encoded.length - encoded.replace(/=+$/u, "").length,
+    already_has_no_padding: !encoded.includes("="),
+    script_sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+function stubScript(record: string) {
+  return "[Console]::Out.Write('" + record.replaceAll("'", "''") + "');[Environment]::Exit(0)";
+}
 export function captureWindowsBoundaryB() {
   if (process.platform !== "win32") throw new Error("native Windows diagnostic only");
   const results = [];
@@ -168,6 +182,73 @@ export function captureWindowsBoundaryB() {
           : `${label}: the recorded Node path has no usable short form on this system; reinstall with Node at an ASCII path\r\n`;
       const accepted = (value: SpawnSyncReturns<Buffer>) =>
         !value.error && value.status === 1 && value.stdout?.length === 0 && value.stderr?.equals(Buffer.from(message));
+      // Aux's hypothesis: two independent TEST-ONLY interventions. Production
+      // renderer/templates and all existing refusal expectations stay unchanged.
+      let spacePaddedScript = script,
+        appendedSpaces = 0;
+      while (Buffer.byteLength(spacePaddedScript, "utf16le") % 3 !== 0) {
+        spacePaddedScript += " ";
+        appendedSpaces++;
+      }
+      const noEqualsEncoded = Buffer.from(spacePaddedScript, "utf16le").toString("base64"),
+        noEqualsSource = source.replace(encoded, () => noEqualsEncoded),
+        escapedLine = commandLine.replace(encoded, () => encoded.replaceAll("=", "^=")),
+        escapedSource = source.replace(commandLine, () => escapedLine);
+      const paddingVariants = [
+        { name: "source-trailing-spaces", source: noEqualsSource, encoded: noEqualsEncoded, appendedSpaces },
+        {
+          name: "escape-equals-in-for-only",
+          source: escapedSource,
+          encoded: encoded.replaceAll("=", "^="),
+          appendedSpaces: 0,
+        },
+      ].map((variant) => {
+        const plainFile = join(bin, "padding-" + variant.name + ".cmd"),
+          observedFile = join(bin, "padding-" + variant.name + "-observed.cmd"),
+          countFile = join(root, "padding-" + variant.name + "-count.bin"),
+          firstFile = join(root, "padding-" + variant.name + "-first.bin");
+        fs.writeFileSync(plainFile, variant.source);
+        const plainResult = spawnSync("cmd.exe", ["/d", "/q", "/c", plainFile, ...argv], {
+          cwd: ROOT,
+          env,
+          timeout: 20000,
+        });
+        const instrumented = variant.source
+          .replace('set "count=0"\n', 'set "count=0"\nset "__B_FIRST="\n')
+          .replace('set "wire=%%L"\n', 'set "wire=%%L"\nif not defined __B_FIRST set "__B_FIRST=%%L"\n')
+          .replace(
+            "setlocal EnableDelayedExpansion\n",
+            `setlocal EnableDelayedExpansion\n1>"${countFile}" echo(!count!\n1>"${firstFile}" echo(!__B_FIRST!\n`,
+          );
+        fs.writeFileSync(observedFile, instrumented);
+        const result = spawnSync("cmd.exe", ["/d", "/q", "/c", observedFile, ...argv], {
+          cwd: ROOT,
+          env,
+          timeout: 20000,
+        });
+        return {
+          name: variant.name,
+          appended_spaces: variant.appendedSpaces,
+          original_utf16le_bytes: Buffer.byteLength(script, "utf16le"),
+          tested_utf16le_bytes: Buffer.byteLength(
+            variant.name === "source-trailing-spaces" ? spacePaddedScript : script,
+            "utf16le",
+          ),
+          encoded_command_text: variant.encoded,
+          source_except_for_line_unchanged:
+            variant.name !== "escape-equals-in-for-only" ||
+            variant.source.replace(escapedLine, () => commandLine) === source,
+          count_hex: fs.existsSync(countFile) ? fs.readFileSync(countFile).toString("hex") : null,
+          first_line_hex: fs.existsSync(firstFile) ? fs.readFileSync(firstFile).toString("hex") : null,
+          plain_result: receipt(plainResult),
+          observed_result: receipt(result),
+          exact_category_message_and_exit: accepted(plainResult) && accepted(result),
+          observation_preserves_result:
+            result.status === plainResult.status &&
+            result.stdout?.equals(plainResult.stdout) &&
+            result.stderr?.equals(plainResult.stderr),
+        };
+      });
       const raw = direct.stdout ?? Buffer.alloc(0);
       let classification: string;
       if (
@@ -239,6 +320,11 @@ export function captureWindowsBoundaryB() {
         },
         file_parser_record_sha256: createHash("sha256").update(fs.readFileSync(frame)).digest("hex"),
         classification,
+        padding_hypothesis: {
+          baseline: encodingAudit("controlled-" + reason, script),
+          real_validator: encodingAudit("real-validator", Buffer.from(realEncoded, "base64").toString("utf16le")),
+          variants: paddingVariants,
+        },
       });
     }
   return {
@@ -254,6 +340,24 @@ export function captureWindowsBoundaryB() {
       runner_os: process.env.RUNNER_OS ?? null,
       runner_arch: process.env.RUNNER_ARCH ?? null,
     },
+    existing_fixture_encoding_audit: [
+      ...["ERR|NOTINSTALLED", "ERR|DAMAGED", "ERR|NODE", "ERR|NODEPATH", "ERR|UNKNOWN", "SENTINEL"].map((body) =>
+        encodingAudit("all-refusal:" + body, stubScript(`TRJ1|${body}|END\r\n`)),
+      ),
+      ...["", "\r\n", "`unobservable\r\n"].map((prefix) =>
+        encodingAudit(
+          "framing-good:" + JSON.stringify(prefix),
+          stubScript(prefix + `TRJ1|OK|0.5.0|${process.execPath}|END\r\n`),
+        ),
+      ),
+      ...["A", "B", "token"].flatMap((root) =>
+        ["trajecta.cmd.tmpl.golden", "trajecta-mcp.cmd.tmpl.golden"].map((name) => {
+          const text = fs.readFileSync(join(ROOT, "test/fixtures/templates", root, name), "utf8"),
+            value = text.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/u)![1];
+          return encodingAudit("render-golden:" + root + "/" + name, Buffer.from(value, "base64").toString("utf16le"));
+        }),
+      ),
+    ],
     results,
   };
 }
