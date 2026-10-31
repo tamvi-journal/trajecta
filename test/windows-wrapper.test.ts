@@ -299,4 +299,10 @@ test("Windows B diagnostic captures raw direct encoded-command output and an exa
   fs.mkdirSync(join(ROOT, "dist"), { recursive: true });
   fs.writeFileSync(join(ROOT, "dist/windows-boundary-b.json"), JSON.stringify(report, null, 2) + "\n");
   for (const row of report.results) t.diagnostic("BOUNDARY_B " + JSON.stringify(row));
+  for (const row of report.results) {
+    assert.equal(row.wrapper_directory.cmd_percent_dp0_utf16le_hex, row.wrapper_directory.direct_env_utf16le_hex);
+    assert.equal(row.controlled_frame_tee.exact_encoded_bytes_unchanged, true);
+    assert.notEqual(row.controlled_frame_tee.parser_received_raw_hex, null, "binary tee captured no wire");
+    assert.equal(row.controlled_frame_tee.same_result_as_original, true, "binary tee changed the original outcome");
+  }
 });

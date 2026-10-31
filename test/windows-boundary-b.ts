@@ -122,10 +122,12 @@ export function captureWindowsBoundaryB() {
           "process.stdin.on('data',b=>{fs.writeSync(fd,b);process.stdout.write(b)});" +
           "process.stdin.on('end',()=>fs.closeSync(fd));\n",
       );
-      const teeLine = commandLine.replace(
-        " 2^>nul`",
-        ` 2^>nul ^| "${process.execPath}" "${teeScript}" "${rawWireFile}"\``,
-      );
+      // Do not add a second set of quotes inside FOR /F's command substitution:
+      // cmd strips its outer quote pair differently. These exact CI fixture
+      // paths are bare-argument-safe; fail the diagnostic if that is not true.
+      if ([process.execPath, teeScript, rawWireFile].some((path) => /[\s%!^&|<>"()`=]/u.test(path)))
+        throw new Error("B binary tee cannot preserve command substitution with these fixture paths");
+      const teeLine = commandLine.replace(" 2^>nul`", ` 2^>nul ^| ${process.execPath} ${teeScript} ${rawWireFile}\``);
       if (teeLine === commandLine) throw new Error("test tee did not match the original host command");
       fs.writeFileSync(teeWrapper, source.replace(commandLine, teeLine));
       const teeResult = spawnSync("cmd.exe", ["/d", "/q", "/c", teeWrapper, ...argv], {
