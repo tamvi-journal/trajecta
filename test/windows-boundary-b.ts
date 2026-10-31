@@ -58,6 +58,27 @@ export function captureWindowsBoundaryB() {
         env,
         timeout: 20000,
       });
+      // Observe the actual FOR /F capture before any record validation. These two
+      // writes are diagnostic-only and do not enter an unchanged-tree assertion.
+      const countFile = join(root, "capture-count.bin"),
+        wireFile = join(root, "capture-wire.bin"),
+        observedFile = join(bin, "capture-observer.cmd");
+      fs.writeFileSync(
+        observedFile,
+        source.replace(
+          "setlocal EnableDelayedExpansion\n",
+          `setlocal EnableDelayedExpansion\n1>"${countFile}" echo(!count!\n1>"${wireFile}" echo(!wire!\n`,
+        ),
+      );
+      const observed = spawnSync("cmd.exe", ["/d", "/q", "/c", observedFile, ...argv], {
+        cwd: ROOT,
+        env,
+        timeout: 20000,
+      });
+      const capture = {
+        count_hex: fs.existsSync(countFile) ? fs.readFileSync(countFile).toString("hex") : null,
+        wire_hex: fs.existsSync(wireFile) ? fs.readFileSync(wireFile).toString("hex") : null,
+      };
       const message =
         reason === "NOTINSTALLED"
           ? `${label}: not installed at ${root}; run the installer\r\n`
@@ -92,6 +113,7 @@ export function captureWindowsBoundaryB() {
         direct: receipt(direct),
         wrapped: receipt(wrapped),
         file_parser_control: receipt(parsed),
+        observed_capture: { ...capture, result: receipt(observed) },
         file_parser_record_sha256: createHash("sha256").update(fs.readFileSync(frame)).digest("hex"),
         classification,
       });
