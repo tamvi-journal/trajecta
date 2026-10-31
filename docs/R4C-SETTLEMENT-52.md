@@ -73,3 +73,30 @@ evidence. Current diagnostic refusal stubs now obey the settled encoder.
 
 No engine/pin/corpus/schema, trust anchor, bootstrap, extractor, template
 FOR line or production writer change is part of this settlement.
+
+## Follow-up: node whitelist options were syntactically dead
+
+Native run `41190048158` at `fc8d325` passed the existing nine Windows
+tests, then the new exact M5 test caught cmd syntax stderr on every real
+OK row. Aux confirmed an implementation defect, not a spec change: the
+space inside the whitelist's `delims` value must be its final character.
+The two template whitelist lines now move that space to the end, preserving
+the exact character multiset. The encoded PowerShell FOR line stays unchanged.
+
+The FOR/IF source audit enumerates the encoded-command capture (empty
+delims followed by eol), the field parser (tokens then delims), and the
+whitelist (eol then delims with the space last). No other FOR options form
+or quoted IF options string was found. The native smoke gates enumerate
+every FOR/IF line and require every nonempty template line and every named
+branch to execute in a test copy, with byte-identical plain/traced outcomes.
+The cases include all refusal/sentinel/status branches, all three absolute
+path prefixes, invalid version/relative paths, a space-bearing valid Node
+alias and nonzero child exit forwarding.
+
+Controlled canonical OK records point to real isolated copies of the
+running Node with `(`, `)` or `&` in their names. Each current wrapper must
+emit only the exact generic refusal, exit one, and leave the Node-start
+preload marker absent. Captured input bytes must match the emitted record.
+A historical test-only old-options control demonstrates the dead guard
+falling through and starting the forbidden alias. Trace writes and these
+markers are harness effects only. The 18-row M5 test is unchanged.

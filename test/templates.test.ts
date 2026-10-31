@@ -11,6 +11,18 @@ import { TEMPLATE_ROOTS } from "./template-roots.ts";
 const modulePath = new URL("../product/src/templates.ts", import.meta.url);
 const subject = fs.existsSync(modulePath) ? await import(modulePath.href) : null;
 
+test("Windows FOR options keep the exact node whitelist with its space last", () => {
+  const expected = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:;\\/._-+=,[]{}?@#$'`~ ";
+  for (const name of ["trajecta.cmd.tmpl", "trajecta-mcp.cmd.tmpl"] as const) {
+    const source = subject.readTemplate(name),
+      options = [...source.matchAll(/^for \/f "([^"]+)"/gmu)].map((m) => m[1]);
+    assert.equal(options.length, 3, "a new FOR options form requires an explicit audit");
+    assert.equal(options[0], "usebackq delims= eol=`");
+    assert.equal(options[1], "tokens=1-5* delims=|");
+    assert.equal(options[2], "eol=| delims=" + expected, name + ": only a final space belongs in delims");
+  }
+});
+
 test("§13.8 a real 33-character root never puts a cmd delimiter in its encoded validator", () => {
   const root = "C:\\" + "r".repeat(30),
     raw = windowsValidator(root),

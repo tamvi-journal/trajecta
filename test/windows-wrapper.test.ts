@@ -430,3 +430,36 @@ test("§13.8 native cmd records and exact outcomes cover every original root pad
     assert.equal(row.tree_unchanged, true, context + ": full tree changed");
   }
 });
+
+test("Windows every template line parses and forbidden OK node paths never launch Node", async (t) => {
+  if (process.platform !== "win32") return t.skip("real Windows native branch/guard regression");
+  const { captureTemplateSmoke } = await import("./windows-template-smoke.ts");
+  const report = captureTemplateSmoke();
+  fs.mkdirSync(join(ROOT, "dist"), { recursive: true });
+  fs.writeFileSync(join(ROOT, "dist/windows-template-smoke.json"), JSON.stringify(report, null, 2) + "\n");
+  for (const row of report.results) t.diagnostic("CMD_SMOKE " + JSON.stringify(row));
+  for (const row of report.results) {
+    const context = `${row.mcp}/${row.id}`;
+    assert.equal(row.plain.error, null, context);
+    assert.deepEqual(row.traced, row.plain, context + ": trace changed stdout/stderr/exit");
+    assert.equal(!!row.plain_marker, row.expected_launched, context);
+    assert.equal(!!row.traced_marker, row.expected_launched, context);
+    if (row.single_record)
+      assert.equal(row.received_wire_hex, row.wire_hex, context + ": actual canonical input bytes");
+    if (row.legacy) {
+      assert.equal(row.plain.status, 0, context + ": old dead guard must fall through");
+      assert.match(Buffer.from(row.plain.stderr_hex!, "hex").toString(), /was unexpected at this time/u, context);
+    } else {
+      assert.equal(row.plain.status, row.expected_status, context);
+      assert.equal(row.plain.stdout_hex, row.expected_stdout_hex, context);
+      assert.equal(row.plain.stderr_hex, row.expected_stderr_hex, context);
+    }
+  }
+  for (const row of report.coverage) {
+    assert.deepEqual(row.unvisited_lines, [], row.template + ": every nonempty line must execute at least once");
+    assert(
+      row.branches.every((branch) => branch.visited),
+      row.template,
+    );
+  }
+});
