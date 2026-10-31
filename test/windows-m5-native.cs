@@ -46,14 +46,16 @@ class NativeM5 {
   [StructLayout(LayoutKind.Sequential)] struct ScreenInfo { public Coord size,cursor; public ushort attributes; public Rect window; public Coord maximum; }
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetConsoleScreenBufferInfo(IntPtr output, out ScreenInfo info);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
-  static extern bool ReadConsoleOutputCharacter(IntPtr output, StringBuilder data, uint count, Coord origin, out uint read);
-  [StructLayout(LayoutKind.Explicit, Size=20)] struct Input {
+  static extern bool ReadConsoleOutputCharacter(IntPtr output,
+    [Out, MarshalAs(UnmanagedType.LPArray, ArraySubType=UnmanagedType.U2, SizeParamIndex=2)] char[] data,
+    uint count, Coord origin, out uint read);
+  [StructLayout(LayoutKind.Explicit, Size=20, CharSet=CharSet.Unicode)] struct Input {
     [FieldOffset(0)] public ushort type; [FieldOffset(4)] public int down;
     [FieldOffset(8)] public ushort repeat; [FieldOffset(10)] public ushort key;
     [FieldOffset(12)] public ushort scan; [FieldOffset(14)] public char character;
     [FieldOffset(16)] public uint controls;
   }
-  [DllImport("kernel32.dll", SetLastError=true)] static extern bool WriteConsoleInput(IntPtr input, Input[] records, uint count, out uint written);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool WriteConsoleInput(IntPtr input, Input[] records, uint count, out uint written);
   static void Require(bool ok, string operation) { if (!ok) throw new Exception(operation+": Win32 "+Marshal.GetLastWin32Error()); }
   static void Save(string path, object data) { File.WriteAllText(path, Json.Serialize(data)+"\n", new UTF8Encoding(false)); }
   static object Short(string path) {
@@ -75,9 +77,10 @@ class NativeM5 {
   }
   static string Screen(IntPtr handle, out ScreenInfo info) {
     Require(GetConsoleScreenBufferInfo(handle,out info),"console buffer");
-    int length=info.size.x*(info.cursor.y+1); StringBuilder b=new StringBuilder(length);
+    int length=info.size.x*(info.cursor.y+1); char[] b=new char[length];
     uint read; Require(ReadConsoleOutputCharacter(handle,b,(uint)length,new Coord(0,0),out read),"read console");
-    return b.ToString();
+    // This API does not append NUL. Preserve exactly the returned UTF-16 cells.
+    return new string(b,0,(int)read);
   }
   static object ConsoleRun(string config) {
     Dictionary<string,object> c=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(config));
