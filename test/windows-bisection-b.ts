@@ -78,24 +78,29 @@ export function captureWindowsBisectionB() {
       );
     }
     const result = runCmd();
-    const plainLines = (result.stdout ?? Buffer.alloc(0))
-      .toString("ascii")
-      .split(/\r?\n/u)
-      .filter((l) => l && !l.startsWith("`"));
+    const plainLines = ((result.stdout ?? Buffer.alloc(0)).toString("latin1").match(/[^\n]*\n|[^\n]+$/gu) ?? [])
+      .filter((line) => line.replace(/\r?\n$/u, "") && !line.startsWith("`"))
+      .map((line) => Buffer.from(line, "latin1"));
     const countHex =
         shape === "outside-for" ? null : fs.existsSync(countFile) ? fs.readFileSync(countFile).toString("hex") : null,
       first =
         shape === "outside-for"
-          ? Buffer.from((plainLines[0] ?? "") + "\r\n")
+          ? (plainLines[0] ?? null)
           : fs.existsSync(firstFile)
             ? fs.readFileSync(firstFile)
             : null,
       last =
         shape === "outside-for"
-          ? Buffer.from((plainLines.at(-1) ?? "") + "\r\n")
+          ? (plainLines.at(-1) ?? null)
           : fs.existsSync(lastFile)
             ? fs.readFileSync(lastFile)
             : null;
+    const count =
+      shape === "outside-for"
+        ? plainLines.length
+        : countHex
+          ? Number(Buffer.from(countHex, "hex").toString("ascii").trim())
+          : null;
     return {
       shape,
       utf16le_bytes: Buffer.byteLength(script, "utf16le"),
@@ -104,15 +109,11 @@ export function captureWindowsBisectionB() {
       script_utf16le_sha256: createHash("sha256").update(Buffer.from(script, "utf16le")).digest("hex"),
       for_command_line: shape === "outside-for" ? null : changed,
       direct_command_line: shape === "outside-for" ? inner.replace("2^>nul", "2>nul") : null,
-      count:
-        shape === "outside-for"
-          ? plainLines.length
-          : countHex
-            ? Number(Buffer.from(countHex, "hex").toString("ascii").trim())
-            : null,
+      count,
       count_hex: countHex,
-      first_line_hex: first?.toString("hex") ?? null,
-      last_line_hex: last?.toString("hex") ?? null,
+      first_line_hex: count === 0 ? null : (first?.toString("hex") ?? null),
+      last_line_hex: count === 0 ? null : (last?.toString("hex") ?? null),
+      empty_observer_file_hex: count === 0 ? (first?.toString("hex") ?? null) : null,
       usage_appeared:
         !!first?.toString("ascii").startsWith("PowerShell[.exe]") ||
         !!last?.toString("ascii").includes("powershell.exe -encodedCommand $encodedCommand"),
