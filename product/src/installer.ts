@@ -26,6 +26,7 @@ export type Options = {
   break?: boolean;
   resumeUninstall?: boolean;
   explicitProfile?: boolean;
+  explicitDb?: boolean;
   userBin?: string;
   noUserBin?: boolean;
 };
@@ -81,6 +82,7 @@ export function options(argv: string[]): Options {
     (result as any)[fields[key as keyof typeof fields]] = argv[++i];
   }
   result.explicitProfile = argv.includes("--profile");
+  result.explicitDb = argv.includes("--db");
   if (result.noUserBin && result.userBin) throw new Error("conflicting user-bin options");
   if (result.userBin && !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/u.test(result.userBin))
     throw new Error("--user-bin requires an absolute path");
@@ -133,7 +135,7 @@ async function committed(opts: Options, node: string, metadata: any, staged: str
   for (const name of ["release.json", "release.json.sig"])
     fs.copyFileSync(join(opts.releaseDir, name), join(source, name), fs.constants.COPYFILE_EXCL);
   checkpoint("A:node");
-  await stageShared(source, opts);
+  await stageShared(source, { ...opts, db: opts.explicitDb ? opts.db : undefined });
   await doctor(source, opts, true);
   checkpoint("A:doctor");
   const createdDirectories = [source, ...walk(source).filter((path) => fs.lstatSync(path).isDirectory())].map((path) =>
@@ -176,7 +178,7 @@ async function committed(opts: Options, node: string, metadata: any, staged: str
     atomic(join(opts.root, "current"), Buffer.from(`${metadata.version}\n${current?.[0] ?? ""}\n`), "current");
   checkpoint("B:current");
   const shared = readShared(folder);
-  if (shared) publishShared(opts.root, folder, shared, data);
+  if (shared) await publishShared(opts.root, folder, shared, data);
   if (!opts.explicitProfile) process.stdout.write("trajecta plugin --profile <name>\n");
   if (!fs.existsSync(opts.db)) {
     checkpoint("C:bootstrap-before-effect");
@@ -274,8 +276,7 @@ export async function install(argv: string[]): Promise<number> {
       opts.root,
       "--release",
       opts.releaseDir,
-      "--db",
-      opts.db,
+      ...(opts.explicitDb ? ["--db", opts.db] : []),
       ...(opts.explicitProfile ? ["--profile", opts.profile] : []),
       ...(opts.userBin ? ["--user-bin", opts.userBin] : []),
       ...(opts.noUserBin ? ["--no-user-bin"] : []),

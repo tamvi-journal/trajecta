@@ -43,6 +43,20 @@ test("M3: install stages exact launchers/plugin, ledgers shared bytes, retries a
     assert.equal(data.entries[name].sha256, entry.sha256);
     assert.equal(data.entries[name].scope, "shared");
   }
+  const base = "plugins/trajecta-example/g1";
+  assert.equal(
+    Object.values(data.entries).filter((entry: any) => entry.plugin === "trajecta-example" && entry.generation === 1)
+      .length,
+    4,
+  );
+  assert.deepEqual(
+    fs.readFileSync(join(root, base, "trajecta.plugin")),
+    fs.readFileSync(join(root, "0.5.0", plan.shared.plugin.archiveSource)),
+  );
+  assert.deepEqual(
+    fs.readFileSync(join(root, base, "recipe.json")),
+    fs.readFileSync(join(root, "0.5.0", plan.shared.plugin.recipeSource)),
+  );
   const before = tree(root),
     stores = tree(join(f.root, "identity"));
   r = run(f, "install", ["--profile", "example", "--no-user-bin"]);
@@ -71,12 +85,11 @@ test("M3: no explicit profile means no plugin and a hint; a modified launcher is
   assert.deepEqual(fs.readFileSync(file), bytes);
   assert.equal(fs.readFileSync(join(root, "current"), "utf8"), "uninstalling\n");
 });
-test("M3: kills at each new launcher/plugin boundary converge from the staged plan", () => {
+test("M3: launcher boundaries converge from staged bytes; plugin boundaries use the §13.6 generation gate", () => {
   const names =
     process.platform === "win32"
       ? ["bin/trajecta.cmd", "bin/trajecta-mcp.cmd"]
       : ["bin/trajecta", "bin/trajecta-mcp", "bin/.user-stub"];
-  names.push("plugins/trajecta-example.plugin");
   for (const point of [
     "A:shared-built",
     ...names.flatMap((name) => [
@@ -85,6 +98,8 @@ test("M3: kills at each new launcher/plugin boundary converge from the staged pl
       "C:shared-effect:" + name,
       "C:shared-ledger:" + name,
     ]),
+    "C:plugin-effect",
+    "C:plugin-ledger",
   ]) {
     const f = signedFixture(testKey());
     const args = ["--profile", "example", "--no-user-bin"];
@@ -117,7 +132,7 @@ test("shared plan never grants ownership to a pre-existing unreceipted equal fil
       ),
     );
     const data = ledger(root);
-    publishShared(root, source, plan, data);
+    await publishShared(root, source, plan, data);
     assert(!data.entries["bin/" + (process.platform === "win32" ? "trajecta.cmd" : "trajecta")]);
   } finally {
     release(root, ".lock", held);
@@ -138,11 +153,11 @@ test(
       const before = tree(outside);
       publishUserStub(root, dir, data);
       assert.deepEqual(tree(outside), before);
-    const ancestor = join(outside, "not-a-directory");
-    fs.writeFileSync(ancestor, "foreign ancestor");
-    const wrongKind = tree(outside);
-    publishUserStub(root, join(ancestor, "user-bin"), data);
-    assert.deepEqual(tree(outside), wrongKind);
+      const ancestor = join(outside, "not-a-directory");
+      fs.writeFileSync(ancestor, "foreign ancestor");
+      const wrongKind = tree(outside);
+      publishUserStub(root, join(ancestor, "user-bin"), data);
+      assert.deepEqual(tree(outside), wrongKind);
       fs.mkdirSync(dir);
       const target = join(dir, "trajecta");
       fs.writeFileSync(target, "foreign");

@@ -5,8 +5,10 @@ import { verifyMetadata, authenticateManifest } from "./release.ts";
 import { readShared, validateShared } from "./shared-effects.ts";
 
 export type Entry =
-  | { kind: "file"; sha256: string; scope: string }
+  | { kind: "file"; sha256: string; scope: string; plugin?: string; generation?: number }
   | { kind: "directory"; scope: string }
+  | { kind: "dir"; scope: "shared"; dev: string; ino: string; plugin?: string; generation?: number }
+  | { kind: "tombstone"; plugin: string; generation: number }
   | { kind: "external-report"; scope: "shared"; dev: string; ino: string };
 export type Ledger = {
   schema: "trajecta.owned/v1";
@@ -23,6 +25,33 @@ export function ledger(root: string): Ledger {
   if (data.schema !== "trajecta.owned/v1" || data.root !== root || !data.entries || !data.effects)
     throw new Error("invalid ownership ledger");
   for (const [path, entry] of Object.entries(data.entries) as Array<[string, Entry]>) {
+    if (path === "plugins" || path.startsWith("plugins/")) {
+      const parts = path.split("/");
+      if (
+        parts.some((part) => !part || part === "." || part === ".." || /[\\\x00-\x1f]/u.test(part)) ||
+        !["file", "dir", "tombstone"].includes(entry.kind)
+      )
+        throw new Error("unsafe plugin ledger path");
+      if (entry.kind !== "tombstone" && entry.scope !== "shared") throw new Error("invalid plugin receipt scope");
+      if (
+        entry.kind === "tombstone" ||
+        ((entry.kind === "file" || entry.kind === "dir") && entry.generation !== undefined)
+      ) {
+        if (
+          !/^trajecta-[^/\\\x00-\x1f]+$/u.test(entry.plugin ?? "") ||
+          !Number.isInteger(entry.generation) ||
+          entry.generation! < 1 ||
+          entry.generation! > 999999999 ||
+          !path.startsWith(`plugins/${entry.plugin}/g${entry.generation}`)
+        )
+          throw new Error("invalid plugin generation receipt");
+      }
+      if (entry.kind === "file" && !/^[a-f0-9]{64}$/u.test(entry.sha256))
+        throw new Error("invalid plugin file receipt");
+      if (entry.kind === "dir" && (!/^\d+$/u.test(entry.dev) || !/^\d+$/u.test(entry.ino)))
+        throw new Error("invalid plugin directory receipt");
+      continue; // Filesystem containment is owned by the typed generation boundary, not ledger decoding.
+    }
     if (entry.kind === "external-report") {
       if (!isAbsolute(path) || entry.scope !== "shared" || !/^\d+$/u.test(entry.dev) || !/^\d+$/u.test(entry.ino))
         throw new Error("unsafe external report");

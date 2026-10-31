@@ -6,6 +6,7 @@ import { inflateRawSync } from "node:zlib";
 import { registerHooks } from "node:module";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { lintSource } from "../tools/authority-lint.ts";
 import { pluginFiles, pluginZip, serverSlug, writePlugin, PluginInputError } from "../product/src/plugin.ts";
 import { parseRecipe, applyDefaults } from "../product/src/mcp.ts";
 import { ROOT, CLI, temporary, isolatedEnv, tree } from "./support.ts";
@@ -233,4 +234,8 @@ test("MCP recipe usage errors exit 2 before touching any store", () => {
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /missing --/);
   assert.deepEqual(tree(folder), before);
+});
+test("stored plugin writer source fence refuses lossy JSON.parse at every plugin writer boundary", () => {
+  for (const name of ["plugin.ts", "plugin-generations.ts", "plugin-command.ts"])
+    assert.throws(() => lintSource("product/src/" + name, "const recipe = JSON.parse(bytes);"), /lossy/u);
 });

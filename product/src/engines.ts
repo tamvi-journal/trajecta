@@ -23,6 +23,39 @@ export async function workApi() {
 export async function safeProfileName(profile: string): Promise<string> {
   return (await import("../../engines/identity/src/paths.ts")).safeFsName(profile);
 }
+/** Product recipe records use the oracle's string/object canonical writer. No number inference. */
+export async function canonicalProductJson(value: unknown): Promise<Buffer> {
+  const { canonicalJson, orderedObject } = await import("../../engines/identity/src/encoding.ts");
+  function convert(item: any): any {
+    if (item === null || typeof item === "string" || typeof item === "boolean") return item;
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("invalid product recipe value");
+    return orderedObject(Object.entries(item).map(([key, value]) => [key, convert(value)]));
+  }
+  return Buffer.from(canonicalJson(convert(value)), "utf8");
+}
+/** Lossless ordered-entry parse, duplicate refusal, and byte-exact canonical recheck. */
+export async function parseCanonicalProductJson(bytes: Buffer): Promise<any> {
+  const { canonicalJson } = await import("../../engines/identity/src/encoding.ts");
+  const { parseLossless } = await import("../../engines/identity/src/json.ts");
+  const value = parseLossless(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  if (!Buffer.from(canonicalJson(value), "utf8").equals(bytes)) throw new Error("noncanonical product recipe");
+  function convert(item: any): any {
+    if (item === null || typeof item === "string" || typeof item === "boolean") return item;
+    if (!item || item.kind !== "object" || Array.isArray(item)) throw new Error("invalid product recipe value");
+    const out = Object.create(null);
+    for (const [key, value] of item.entries) {
+      if (Object.hasOwn(out, key)) throw new Error("duplicate product recipe field");
+      out[key] = convert(value);
+    }
+    return out;
+  }
+  return convert(value);
+}
+/** Version display only; preserve the lossless parser even for pretty plugin metadata. */
+export async function productMetadataVersion(bytes: Buffer): Promise<string> {
+  const { parseLossless, get, asString } = await import("../../engines/identity/src/json.ts");
+  return asString(get(parseLossless(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), "version"));
+}
 /** MCP has its own recipe boundary; the entries retain their own error envelopes. */
 export async function runEngineMcp(engine: Engine, argv: string[]): Promise<void> {
   const entry = enginePath(engine, engine === "identity" ? "mcp.ts" : "mcp-server.ts");

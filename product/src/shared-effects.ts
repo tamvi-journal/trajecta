@@ -1,8 +1,15 @@
 import * as fs from "node:fs";
-import { dirname, join, resolve, isAbsolute, delimiter } from "node:path";
+import { dirname, join, resolve, isAbsolute, delimiter, basename } from "node:path";
 import { homedir } from "node:os";
 import { posixWrapper, windowsWrapper, userStub, WrapperBuildError, shQuote } from "./wrappers.ts";
-import { pluginFiles, pluginName, pluginZip, type PluginOptions } from "./plugin.ts";
+import { type PluginOptions } from "./plugin.ts";
+import {
+  preparePlugin,
+  preflightPlugin,
+  preparedFromBytes,
+  buildGeneration,
+  currentGeneration,
+} from "./plugin-generations.ts";
 import { atomic, beneath, digest, jsonBytes, regular, safeRoot } from "./install-fs.ts";
 import { checkpoint } from "./checkpoint.ts";
 import { saveLedger, type Ledger } from "./owned.ts";
@@ -11,6 +18,7 @@ export type SharedPlan = {
   files: Record<string, { source: string; sha256: string; mode: number; eligible: boolean }>;
   directories: string[];
   userBin?: string;
+  plugin?: { name: string; recipeSource: string; archiveSource: string; recipeSha: string; archiveSha: string };
 };
 /** The only pre-validation Windows executable is pinned once, at install. */
 export function systemPowerShell(): string {
@@ -52,8 +60,6 @@ export async function stageShared(
     targets["bin/trajecta-mcp"] = { bytes: Buffer.from(posixWrapper(opts.root, true)), mode: 0o755 };
     targets["bin/.user-stub"] = { bytes: Buffer.from(userStub(opts.root)), mode: 0o755 };
   }
-  if (opts.explicitProfile)
-    targets["plugins/" + (await pluginName(opts.profile))] = { bytes: pluginZip(await pluginFiles(opts)), mode: 0o644 };
   const files: SharedPlan["files"] = {},
     directories = new Set<string>();
   const existing = (await import("./owned.ts")).ledger(opts.root);
@@ -72,6 +78,22 @@ export async function stageShared(
     if (!fs.existsSync(join(opts.root, dirname(name)))) directories.add(dirname(name));
   }
   const plan: SharedPlan = { files, directories: [...directories].sort() };
+  if (opts.explicitProfile) {
+    const prepared = await preparePlugin(opts);
+    await preflightPlugin(opts.root, prepared.name, existing);
+    const recipeSource = ".install-effects/plugin/recipe.json",
+      archiveSource = ".install-effects/plugin/trajecta.plugin";
+    fs.mkdirSync(join(generated, "plugin"));
+    fs.writeFileSync(join(source, recipeSource), prepared.recipeBytes, { flag: "wx" });
+    fs.writeFileSync(join(source, archiveSource), prepared.bytes, { flag: "wx" });
+    plan.plugin = {
+      name: prepared.name,
+      recipeSource,
+      archiveSource,
+      recipeSha: digest(prepared.recipeBytes),
+      archiveSha: digest(prepared.bytes),
+    };
+  }
   if (process.platform !== "win32" && !opts.noUserBin)
     plan.userBin = resolve(opts.userBin ?? join(homedir(), ".local/bin"));
   fs.writeFileSync(join(generated, "shared.json"), jsonBytes(plan), { flag: "wx" });
@@ -87,13 +109,21 @@ export function readShared(folder: string): SharedPlan | undefined {
     if (!regular(join(folder, entry.source)) || digest(fs.readFileSync(join(folder, entry.source))) !== entry.sha256)
       throw new Error("staged shared bytes differ");
   }
+  if (plan.plugin)
+    for (const [name, sha] of [
+      [plan.plugin.recipeSource, plan.plugin.recipeSha],
+      [plan.plugin.archiveSource, plan.plugin.archiveSha],
+    ]) {
+      if (!regular(join(folder, name)) || digest(fs.readFileSync(join(folder, name))) !== sha)
+        throw new Error("staged plugin bytes differ");
+    }
   return plan;
 }
 export function validateShared(plan: SharedPlan): void {
   if (!plan.files || !Array.isArray(plan.directories)) throw new Error("invalid shared plan");
   for (const [name, entry] of Object.entries(plan.files)) {
     if (
-      !/^(?:bin\/(?:trajecta(?:-mcp)?(?:\.cmd)?|\.user-stub)|plugins\/trajecta-[^/\\]+\.plugin)$/u.test(name) ||
+      !/^bin\/(?:trajecta(?:-mcp)?(?:\.cmd)?|\.user-stub)$/u.test(name) ||
       entry.source !== ".install-effects/" + name ||
       !/^[a-f0-9]{64}$/u.test(entry.sha256) ||
       ![0o644, 0o755].includes(entry.mode) ||
@@ -101,11 +131,17 @@ export function validateShared(plan: SharedPlan): void {
     )
       throw new Error("unsafe shared plan");
   }
-  if (
-    plan.directories.some((name) => name !== "bin" && name !== "plugins") ||
-    (plan.userBin !== undefined && !isAbsolute(plan.userBin))
-  )
+  if (plan.directories.some((name) => name !== "bin") || (plan.userBin !== undefined && !isAbsolute(plan.userBin)))
     throw new Error("unsafe shared directory plan");
+  if (
+    plan.plugin &&
+    (!/^trajecta-[^/\\\x00-\x1f]+$/u.test(plan.plugin.name) ||
+      plan.plugin.recipeSource !== ".install-effects/plugin/recipe.json" ||
+      plan.plugin.archiveSource !== ".install-effects/plugin/trajecta.plugin" ||
+      !/^[a-f0-9]{64}$/u.test(plan.plugin.recipeSha) ||
+      !/^[a-f0-9]{64}$/u.test(plan.plugin.archiveSha))
+  )
+    throw new Error("unsafe plugin plan");
 }
 export function pathHint(root: string): void {
   const folder = join(root, "bin");
@@ -167,7 +203,7 @@ export function publishUserStub(root: string, dir: string, data: Ledger): void {
   if (!(process.env.PATH ?? "").split(delimiter).includes(dir))
     process.stdout.write(`export PATH=${shQuote(dir)}:"$PATH"\n`);
 }
-export function publishShared(root: string, folder: string, plan: SharedPlan, data: Ledger): void {
+export async function publishShared(root: string, folder: string, plan: SharedPlan, data: Ledger): Promise<void> {
   for (const name of plan.directories) {
     const path = join(root, name);
     safeRoot(path);
@@ -220,4 +256,31 @@ export function publishShared(root: string, folder: string, plan: SharedPlan, da
     )
       publishUserStub(root, plan.userBin, data);
   } else pathHint(root);
+  if (plan.plugin) {
+    const p = plan.plugin,
+      effect = "plugin-install:" + basename(folder);
+    if (!data.effects[effect]) {
+      const prepared = await preparedFromBytes(
+        p.name,
+        fs.readFileSync(join(folder, p.recipeSource)),
+        fs.readFileSync(join(folder, p.archiveSource)),
+      );
+      const current = await currentGeneration(root, p.name, data);
+      const result =
+        current &&
+        current.recipe.plugin_sha256 === p.archiveSha &&
+        digest(await (await import("./engines.ts")).canonicalProductJson(current.recipe)) === p.recipeSha
+          ? current
+          : await buildGeneration(root, prepared, data);
+      data.effects[effect] = {
+        plugin: p.name,
+        generation: result.generation,
+        recipe_sha256: p.recipeSha,
+        plugin_sha256: p.archiveSha,
+      };
+      checkpoint("C:plugin-effect");
+      saveLedger(root, data);
+      checkpoint("C:plugin-ledger");
+    }
+  }
 }

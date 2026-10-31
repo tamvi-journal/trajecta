@@ -11,6 +11,7 @@ import { requireAnchor } from "./release.ts";
 import { recoveryVerifierSource } from "./engines.ts";
 import { checkpoint } from "./checkpoint.ts";
 import { reportExternal } from "./shared-effects.ts";
+import { removeAllPlugins, reportPlugins } from "./plugin-generations.ts";
 
 function versions(root: string): string[] {
   return fs
@@ -40,7 +41,12 @@ function unlink(root: string, name: string): void {
 }
 function removeScope(root: string, scope: string, data: Ledger): string[] {
   const entries = Object.entries(data.entries).filter(
-    ([, entry]) => entry.scope === scope && entry.kind !== "external-report",
+    ([name, entry]) =>
+      "scope" in entry &&
+      entry.scope === scope &&
+      entry.kind !== "external-report" &&
+      name !== "plugins" &&
+      !name.startsWith("plugins/"),
   );
   const priority = (name: string) => (name.endsWith("/.planned.json") ? 1 : name.endsWith("/MANIFEST.json") ? 2 : 0);
   for (const [name, entry] of entries
@@ -198,6 +204,8 @@ async function uninstallWithLock(argv: string[], inherited?: Owner): Promise<num
       paths.push(...removeScope(opts.root, ver, data));
     checkpoint("U:versions");
     if (paths.length) retained(opts.root, paths);
+    const pluginPaths = await removeAllPlugins(opts.root, data);
+    if (pluginPaths.length) retained(opts.root, pluginPaths);
     const shared = removeScope(opts.root, "shared", data);
     if (shared.length) retained(opts.root, shared);
     checkpoint("U:shared");
@@ -251,5 +259,6 @@ export async function productDoctor(argv: string[]): Promise<number> {
   if (!current || current === "uninstalling")
     throw new Error("trajecta is being uninstalled; run trajecta uninstall --resume");
   await doctor(join(opts.root, current[0]), opts);
+  await reportPlugins(opts.root, ledger(opts.root));
   return 0;
 }

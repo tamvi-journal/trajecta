@@ -74,15 +74,96 @@ test("product plugin --out is independent of cwd, atomic and unledgered; default
   result = run([]);
   assert.equal(result.status, 0, result.stderr);
   const data = JSON.parse(fs.readFileSync(join(root, "owned.json"), "utf8"));
-  assert.equal(data.entries["plugins/trajecta-example.plugin"].scope, "shared");
+  const archive = "plugins/trajecta-example/g1/trajecta.plugin";
+  assert.equal(data.entries[archive].scope, "shared");
   assert(!Object.keys(data.entries).includes(out));
-  fs.writeFileSync(join(root, "plugins/trajecta-example.plugin"), "owner-edited");
+  fs.writeFileSync(join(root, archive), "owner-edited");
+  const protectedTree = tree(root);
   result = run([]);
-  assert.equal(result.status, 0);
-  assert.match(result.stdout, /retained/);
-  assert.equal(fs.readFileSync(join(root, "plugins/trajecta-example.plugin"), "utf8"), "owner-edited");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /was modified/);
+  assert.equal(fs.readFileSync(join(root, archive), "utf8"), "owner-edited");
+  assert.deepEqual(tree(root), protectedTree);
   const before = tree(folder);
   result = run(["--name", "x".repeat(60)]);
   assert.equal(result.status, 1);
   assert.deepEqual(tree(folder), before);
+});
+test("a symlinked plugin root is rejected before interpreting an external ownership ledger", () => {
+  const folder = temporary(),
+    outside = temporary(),
+    root = join(folder, "alias");
+  fs.writeFileSync(join(outside, "owned.json"), "foreign non-JSON marker");
+  fs.symlinkSync(outside, root, process.platform === "win32" ? "junction" : "dir");
+  const before = tree(outside),
+    r = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI, "plugin", "--root", root, "--profile", "example"],
+      { env: isolatedEnv(folder), encoding: "utf8" },
+    );
+  assert.equal(r.status, 1);
+  assert.equal(
+    r.stderr,
+    `trajecta: plugin directory ${root} is not a product-owned real directory; nothing was written\n`,
+  );
+  assert.deepEqual(tree(outside), before);
+});
+
+test("K4 concurrent actual MCP entries observe independent same-key home defaults", async () => {
+  const { spawn } = await import("node:child_process");
+  const f = signedFixture(testKey()),
+    root = join(f.root, "install");
+  const setup = spawnSync(
+    process.execPath,
+    [CLI, "install", "--root", root, "--release", f.release, "--db", join(f.root, "store.sqlite3"), "--no-user-bin"],
+    { env: f.env, encoding: "utf8" },
+  );
+  assert.equal(setup.status, 0, setup.stderr);
+  const runs = await Promise.all(
+    ["a", "b"].map(async (profile) => {
+      fs.mkdirSync(join(f.env.TRAJECTA_IDENTITY_PROFILES, profile), { recursive: true });
+      fs.copyFileSync(
+        join(ROOT, "engines/trajecta_identity/profiles/example/profile.json"),
+        join(f.env.TRAJECTA_IDENTITY_PROFILES, profile, "profile.json"),
+      );
+      const servers = JSON.parse(
+        (await pluginFiles({ root, profile, dataDir: "~/" + profile }))[".mcp.json"].toString(),
+      ).mcpServers;
+      const entry = servers["trajecta-identity-" + profile];
+      const receipt = join(f.root, profile + ".json"),
+        env = {
+          ...f.env,
+          NODE_NO_WARNINGS: "1",
+          NODE_OPTIONS: `--import=${new URL("./mcp-env-observer.ts", import.meta.url).href}`,
+          TEST_RECIPE_RECEIPT: receipt,
+        };
+      delete env.TRAJECTA_IDENTITY_DATA_DIR;
+      const child = spawn(entry.command, entry.args, { env, stdio: ["pipe", "pipe", "pipe"] });
+      const out: Buffer[] = [],
+        err: Buffer[] = [];
+      child.stdout.on("data", (part) => out.push(part));
+      child.stderr.on("data", (part) => err.push(part));
+      const done = new Promise<void>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code) => {
+          try {
+            assert.equal(code, 0, Buffer.concat(err).toString());
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+      child.stdin.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n');
+      await done;
+      assert.equal(JSON.parse(Buffer.concat(out).toString()).id, 1);
+      assert.equal(Buffer.concat(err).toString(), "");
+      const observed = JSON.parse(fs.readFileSync(receipt, "utf8"));
+      assert.equal(observed.value, join(env.HOME, profile));
+      assert(!fs.existsSync(observed.value), "initialize cannot bootstrap the default path");
+      return observed;
+    }),
+  );
+  assert.notEqual(runs[0].pid, runs[1].pid);
+  assert.notEqual(runs[0].value, runs[1].value);
 });

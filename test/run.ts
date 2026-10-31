@@ -22,6 +22,7 @@ run([
   "test/plugin.test.ts",
   "test/posix-wrapper.test.ts",
   "test/windows-wrapper.test.ts",
+  "test/plugin-generations.test.ts",
 ]);
 run([
   "--test",
@@ -38,6 +39,10 @@ run([
   "test/bootstrap.test.ts",
   "test/extractor.test.ts",
   "test/templates.test.ts",
+  "test/plugin-db.test.ts",
+  "test/plugin-generation-crash.test.ts",
+  "test/wrapper-signals.test.ts",
+  "test/plugin-edges.test.ts",
   "test/shared-effects.test.ts",
   "test/mcp-wrapper.test.ts",
 ]);

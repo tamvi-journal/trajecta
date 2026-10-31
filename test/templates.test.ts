@@ -64,3 +64,25 @@ test("§13.6 build refuses missing, extra, duplicated-token and malformed-token 
     assert.throws(() => build("release", false, folder), subject.TemplateError, kind);
   }
 });
+
+test("§13.6 every rendered template matches its checked-in A/B and token-root golden bytes", () => {
+  assert(subject);
+  const ps = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+  for (const [id, root] of [
+    ["A", "/isolated/A"],
+    ["B", "/isolated/B"],
+    ["token", "/tmp/@@ROOT_SH@@"],
+  ]) {
+    const validator = subject.renderTemplate("validator.ps1.tmpl", subject.readTemplate("validator.ps1.tmpl"), {
+      root,
+    });
+    for (const name of Object.keys(subject.TEMPLATE_COUNTS)) {
+      const actual = subject.renderTemplate(name, subject.readTemplate(name), { root, powershell: ps, validator });
+      assert.deepEqual(
+        Buffer.from(actual),
+        fs.readFileSync(new URL(`./fixtures/templates/${id}/${name}.golden`, import.meta.url)),
+        `${id}/${name}`,
+      );
+    }
+  }
+});
