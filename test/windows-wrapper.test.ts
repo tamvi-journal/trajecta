@@ -4,10 +4,78 @@ import { join, win32 } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { ROOT, temporary, isolatedEnv, tree } from "./support.ts";
+import { HOST_FLAGS, NOOP_ENCODED, prewarmWindowsHost } from "./windows-host-a.ts";
 
 const path = new URL("../product/src/wrappers.ts", import.meta.url);
 const subject = fs.existsSync(path) ? await import(path.href) : null;
 const systemPS = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+
+test("Windows PowerShell cold-start inventory is closed and typed; the second start is byte-stable", (t) => {
+  if (process.platform !== "win32") return t.skip("real Windows host characterization");
+  const ps = win32.join(process.env.SystemRoot!, "System32/WindowsPowerShell/v1.0/powershell.exe");
+  const allowed: Record<string, string> = {
+    AppData: "dir",
+    "AppData/Local": "dir",
+    "AppData/Local/Microsoft": "dir",
+    "AppData/Local/Microsoft/Windows": "dir",
+    "AppData/Local/Microsoft/Windows/PowerShell": "dir",
+    "AppData/Local/Microsoft/Windows/PowerShell/StartupProfileData-NonInteractive": "file",
+    "AppData/Roaming": "dir",
+  };
+  const observations = [false, true].map((precreated) => {
+    const root = temporary(),
+      env = isolatedEnv(root);
+    if (precreated) fs.mkdirSync(join(root, "AppData/Local"), { recursive: true });
+    const before = tree(root);
+    prewarmWindowsHost(ps, env);
+    const first = tree(root);
+    const entries = Object.keys(first).map((key) => {
+      const stat = fs.lstatSync(join(root, key));
+      return {
+        path: key.replace(/\/$/u, ""),
+        kind: stat.isDirectory() ? "dir" : stat.isFile() ? "file" : "other",
+        was_present: Object.hasOwn(before, key),
+        sha256: stat.isFile() ? first[key] : null,
+        bytes_hex: stat.isFile() ? fs.readFileSync(join(root, key)).toString("hex") : null,
+      };
+    });
+    prewarmWindowsHost(ps, env);
+    const second = tree(root);
+    const secondFiles = Object.fromEntries(
+      Object.keys(second)
+        .filter((key) => fs.lstatSync(join(root, key)).isFile())
+        .map((key) => [key, { sha256: second[key], bytes_hex: fs.readFileSync(join(root, key)).toString("hex") }]),
+    );
+    return { precreated, root, before, first, entries, second, second_files: secondFiles };
+  });
+  const report = {
+    schema: "trajecta.windows-host-a/v1",
+    powershell: ps,
+    flags: HOST_FLAGS,
+    encoded: NOOP_ENCODED,
+    node: process.versions.node,
+    run_id: process.env.GITHUB_RUN_ID ?? null,
+    checkout_sha: process.env.GITHUB_SHA ?? null,
+    image_os: process.env.ImageOS ?? null,
+    image_version: process.env.ImageVersion ?? null,
+    observations,
+  };
+  fs.mkdirSync(join(ROOT, "dist"), { recursive: true });
+  fs.writeFileSync(join(ROOT, "dist/windows-host-a.json"), JSON.stringify(report, null, 2) + "\n");
+  t.diagnostic("HOST_A " + JSON.stringify(report));
+  for (const row of observations) {
+    for (const [key, value] of Object.entries(row.before))
+      assert.equal(row.first[key], value, "pre-existing entry changed: " + key);
+    for (const entry of row.entries)
+      if (!entry.was_present)
+        assert.equal(entry.kind, allowed[entry.path], "new entry outside closed typed inventory: " + entry.path);
+    assert.deepEqual(
+      row.second,
+      row.first,
+      "STOP: host rewrote the second-start tree; both bytes/SHA in windows-host-a.json",
+    );
+  }
+});
 
 test("Windows encoded validator fits the 240-character non-ASCII root without truncation", () => {
   assert(subject, "native wrapper renderer is not implemented");
@@ -118,6 +186,7 @@ test("Windows cmd canonical reconstruction rejects every observable malformed fr
     };
     for (const record of malformed) {
       stub(record);
+      prewarmWindowsHost(ps, isolatedEnv(root));
       const before = tree(root);
       const r = spawnSync("cmd.exe", ["/d", "/q", "/c", file, ...args], {
         env: isolatedEnv(root),
@@ -179,6 +248,7 @@ test("Windows all pointer rows precede Node; status has exact arity; moved cmd a
       "0.5.0\n\0\n",
     ]) {
       fs.writeFileSync(join(root, "current"), bytes);
+      prewarmWindowsHost(ps, isolatedEnv(root));
       const before = tree(root);
       const r = run();
       assert.equal(r.status, 1);
@@ -272,6 +342,7 @@ test("Windows every refusal branch emits exact CRLF bytes with no trailing space
           .windowsWrapper(root, ps, mcp)
           .replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + Buffer.from(script, "utf16le").toString("base64")),
       );
+      prewarmWindowsHost(ps, isolatedEnv(root));
       const before = tree(root);
       const result = spawnSync(
         "cmd.exe",

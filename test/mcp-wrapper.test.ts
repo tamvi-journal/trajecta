@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { signedFixture, testKey } from "./install-fixture.ts";
 import { CLI, ROOT, temporary, isolatedEnv, tree } from "./support.ts";
 import { pluginFiles } from "../product/src/plugin.ts";
+import { prewarmWindowsHost } from "./windows-host-a.ts";
 
 test("M5: real identity/work initialize stdout is byte-exact directly and through each OS-native wrapper", async () => {
   const f = signedFixture(testKey()),
@@ -28,6 +29,8 @@ test("M5: real identity/work initialize stdout is byte-exact directly and throug
     { env, encoding: "utf8" },
   );
   assert.equal(installed.status, 0, installed.stderr);
+  if (process.platform === "win32")
+    prewarmWindowsHost(win32.join(process.env.SystemRoot!, "System32/WindowsPowerShell/v1.0/powershell.exe"), env);
   const before = tree(root),
     stores = tree(join(f.root, "identity"));
   const servers = JSON.parse((await pluginFiles({ root, profile: "example" }))[".mcp.json"].toString()).mcpServers;
