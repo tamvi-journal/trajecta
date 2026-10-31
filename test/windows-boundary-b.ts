@@ -82,6 +82,8 @@ export function captureWindowsBoundaryB() {
       // Isolate argument transport: a test-only host stand-in records argv[5]
       // (the Base64 payload) through direct cmd and the identical FOR command.
       // This never substitutes a host in production or any conformance assertion.
+      // Batch %~5 expansion is not native executable argv: this shim alone cannot
+      // establish what powershell.exe received (both probe paths can lose '=').
       const argHost = join(bin, "argument-observer.cmd"),
         argFile = join(root, "encoded-argument.bin"),
         argWrapper = join(bin, "argument-wrapper.cmd");
@@ -119,6 +121,8 @@ export function captureWindowsBoundaryB() {
       )
         classification = "b: host failure or extra output";
       else if (!raw.equals(expected)) classification = "a: validator emits a different record";
+      else if (capture.count_hex !== "310d0a" || capture.wire_hex !== expected.toString("hex"))
+        classification = "b: command-host path emitted extra/different output before record validation";
       else if (!accepted(parsed)) classification = "c: cmd parser rejects a correct record";
       else if (!accepted(wrapped))
         classification = "unclassified: direct record and file-parser control pass; inspect host-command capture";
@@ -139,6 +143,7 @@ export function captureWindowsBoundaryB() {
         file_parser_control: receipt(parsed),
         observed_capture: { ...capture, result: receipt(observed) },
         encoded_argument_probe: {
+          limitation: "batch parameter expansion is not native-executable argv",
           expected_hex: Buffer.from(encoded + "\r\n").toString("hex"),
           direct_hex: directArg,
           via_for_hex: forArg,
