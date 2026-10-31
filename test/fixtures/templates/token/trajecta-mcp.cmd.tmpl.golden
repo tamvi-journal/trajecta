@@ -44,7 +44,7 @@ if not "!wire!"=="TRJ1|SENTINEL|END" goto invalid
 endlocal
 goto resume
 :resume
-echo trajecta is being uninstalled; resume with the command printed by 'trajecta uninstall', or run the installer bootstrap with --resume-uninstall 1>&2
+1>&2 echo trajecta is being uninstalled; resume with the command printed by 'trajecta uninstall', or run the installer bootstrap with --resume-uninstall
 exit /b 1
 :ok
 if not "!e!"=="END" goto invalid
@@ -65,23 +65,23 @@ endlocal & set "n=%d%" & set "v=%c%"
 exit /b %errorlevel%
 :missing
 endlocal
-for %%R in ("%~dp0..") do <nul set /p "=%~1: not installed at %%~fR; run the installer" 1>&2
-echo( 1>&2
+for %%R in ("%~dp0..") do 1>&2 <nul set /p "=%~1: not installed at %%~fR; run the installer"
+1>&2 echo(
 exit /b 1
 :damaged
 endlocal
-for %%R in ("%~dp0..") do <nul set /p "=%~1: installation at %%~fR is damaged; run the installer" 1>&2
-echo( 1>&2
+for %%R in ("%~dp0..") do 1>&2 <nul set /p "=%~1: installation at %%~fR is damaged; run the installer"
+1>&2 echo(
 exit /b 1
 :node
 endlocal
-echo %~1: need Node 22.19+ or 24 LTS 1>&2
+1>&2 echo %~1: need Node 22.19+ or 24 LTS
 exit /b 1
 :nodepath
 endlocal
-echo %~1: the recorded Node path has no usable short form on this system; reinstall with Node at an ASCII path 1>&2
+1>&2 echo %~1: the recorded Node path has no usable short form on this system; reinstall with Node at an ASCII path
 exit /b 1
 :invalid
 endlocal
-echo %~1: cannot validate the installation ^(Windows PowerShell unavailable or blocked^) 1>&2
+1>&2 echo %~1: cannot validate the installation ^(Windows PowerShell unavailable or blocked^)
 exit /b 1

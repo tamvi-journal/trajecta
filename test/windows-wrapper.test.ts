@@ -239,3 +239,54 @@ test("Windows all pointer rows precede Node; status has exact arity; moved cmd a
     fs.unlinkSync(join(root, "current"));
   }
 });
+
+test("Windows every refusal branch emits exact CRLF bytes with no trailing space or store writes", (t) => {
+  if (process.platform !== "win32") return t.skip("real Windows native contract job");
+  const root = temporary(),
+    bin = join(root, "bin"),
+    failures: string[] = [];
+  fs.mkdirSync(bin);
+  const ps = win32.join(process.env.SystemRoot!, "System32/WindowsPowerShell/v1.0/powershell.exe");
+  const resume =
+    "trajecta is being uninstalled; resume with the command printed by 'trajecta uninstall', or run the installer bootstrap with --resume-uninstall";
+  for (const mcp of [false, true]) {
+    const label = mcp ? "exact-server" : "trajecta",
+      file = join(bin, mcp ? "trajecta-mcp.cmd" : "trajecta.cmd");
+    const cases = [
+      ["ERR|NOTINSTALLED", `${label}: not installed at ${root}; run the installer`],
+      ["ERR|DAMAGED", `${label}: installation at ${root} is damaged; run the installer`],
+      ["ERR|NODE", `${label}: need Node 22.19+ or 24 LTS`],
+      [
+        "ERR|NODEPATH",
+        `${label}: the recorded Node path has no usable short form on this system; reinstall with Node at an ASCII path`,
+      ],
+      ["ERR|UNKNOWN", `${label}: cannot validate the installation (Windows PowerShell unavailable or blocked)`],
+      ["SENTINEL", resume],
+    ];
+    for (const [body, expected] of cases) {
+      const record = `TRJ1|${body}|END\r\n`,
+        script = "[Console]::Out.Write('" + record + "');[Environment]::Exit(0)";
+      fs.writeFileSync(
+        file,
+        subject
+          .windowsWrapper(root, ps, mcp)
+          .replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + Buffer.from(script, "utf16le").toString("base64")),
+      );
+      const before = tree(root);
+      const result = spawnSync(
+        "cmd.exe",
+        ["/d", "/q", "/c", file, ...(mcp ? [label, "--engine", "identity", "--"] : ["version"])],
+        { env: isolatedEnv(root), timeout: 20000 },
+      );
+      try {
+        assert.equal(result.status, 1);
+        assert.deepEqual(result.stdout, Buffer.alloc(0));
+        assert.deepEqual(result.stderr, Buffer.from(expected + "\r\n"));
+        assert.deepEqual(tree(root), before);
+      } catch (error) {
+        failures.push(`${label}/${body}: ${(error as Error).message}`);
+      }
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("\n"));
+});
