@@ -29,6 +29,7 @@ jobs:
       - name: Pin checkout byte policy
         run: git config core.autocrlf false
       - name: Run complete foundation gates in isolated roots
+        shell: ${{ matrix.os == 'windows-latest' && 'cmd' || 'bash' }}
         env:
           TEST_OTHER_NODE: ${{ steps.alternate.outputs.path }}
         run: node --experimental-strip-types test/run.ts --fetch

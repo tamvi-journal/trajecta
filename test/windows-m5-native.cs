@@ -86,7 +86,15 @@ class NativeM5 {
       IntPtr.Zero,false,0x10,IntPtr.Zero,(string)c["cwd"],ref start,out p),"new console process");
     IntPtr output=IntPtr.Zero,input=IntPtr.Zero; uint code=259; bool sent=false;
     try {
-      FreeConsole(); Require(AttachConsole(p.pid),"attach real console");
+      FreeConsole();
+      List<int> attachErrors=new List<int>(); bool attached=false; Stopwatch attach=Stopwatch.StartNew();
+      // CreateProcess may return before conhost has allocated the child's console.
+      while(attach.ElapsedMilliseconds<3000) {
+        if(AttachConsole(p.pid)){attached=true;break;}
+        attachErrors.Add(Marshal.GetLastWin32Error());GetExitCodeProcess(p.process,out code);
+        if(code!=259)break;Thread.Sleep(10);
+      }
+      if(!attached)throw new Exception("attach real console: errors="+String.Join(",",attachErrors)+" exit="+code);
       Require(SetConsoleCtrlHandler(Ignore,true),"observer ignores broadcast Ctrl-C");
       output=CreateFile("CONOUT$",0x80000000,3,IntPtr.Zero,3,0,IntPtr.Zero);
       input=CreateFile("CONIN$",0xC0000000,3,IntPtr.Zero,3,0,IntPtr.Zero);
@@ -120,7 +128,7 @@ class NativeM5 {
       }
       Require(code!=259,"console child termination");
       ScreenInfo finalInfo; string final=Screen(output,out finalInfo);
-      return new { child_pid=p.pid, ctrl_c_sent=sent, batch_prompt=prompt, answer=prompt?(string)c["answer"]:null,
+      return new { child_pid=p.pid, attach_errors=attachErrors, ctrl_c_sent=sent, batch_prompt=prompt, answer=prompt?(string)c["answer"]:null,
         exit_unsigned=code,exit_signed=unchecked((int)code),width=finalInfo.size.x,
         before_utf16le_base64=Convert.ToBase64String(Encoding.Unicode.GetBytes(before)),
         prompt_utf16le_base64=Convert.ToBase64String(Encoding.Unicode.GetBytes(promptText)),
@@ -140,6 +148,7 @@ class NativeM5 {
   }
   static int Main(string[] args) {
     try {
+      Console.OutputEncoding=new UTF8Encoding(false);
       if(args.Length>0 && args[0]=="--short") { Console.WriteLine(Json.Serialize(Short(args[1])));return 0; }
       if(args.Length>0 && args[0]=="--volume") {
         StringBuilder b=new StringBuilder(1024);Require(GetVolumeNameForVolumeMountPoint(args[1],b,1024),"mounted volume name");

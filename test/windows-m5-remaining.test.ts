@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { windowsWrapper } from "../product/src/wrappers.ts";
@@ -91,6 +91,16 @@ test(
       logs.push(vr);
       assert.equal(vr.status, 0, "STOP M5-1: isolated VHD/mount unavailable; raw diskpart and volume probe recorded");
       const volume = jsonResult(vr).volume;
+      // Never change the host or checkout volume's short-name setting.
+      for (const drive of new Set([win32.parse(ROOT).root, win32.parse(powershell()).root])) {
+        const hostVolume = raw(tool, ["--volume", drive], env);
+        logs.push(hostVolume);
+        assert.notEqual(
+          volume.toLowerCase(),
+          jsonResult(hostVolume).volume.toLowerCase(),
+          "STOP: the mount resolved to a host volume rather than the disposable VHD",
+        );
+      }
       logs.push(raw(systemPath("System32/fsutil.exe"), ["8dot3name", "query"], env));
       for (const enabled of [true, false]) {
         const setting = raw(systemPath("System32/fsutil.exe"), ["8dot3name", "set", volume, enabled ? "0" : "1"], env);
@@ -174,11 +184,11 @@ test(
     const env = {
       ...f.env,
       SYSTEMROOT: fakeRoot,
-      windir: fakeRoot,
       TEST_NATIVE_MODE: "canary",
       TEST_NATIVE_MARKER: marker,
     };
     const sensitivity = raw(fake, [], env);
+    receipt("pinned-canary", { sensitivity, fake, rows: [] });
     assert.equal(sensitivity.status, 17);
     assert(fs.existsSync(marker));
     fs.unlinkSync(marker);
@@ -209,10 +219,16 @@ test(
     const f = fixture(),
       rows = [];
     const capability = ps(
-      "$ErrorActionPreference='Continue'; 'APPIDSVC'; sc.exe query AppIDSvc; 'APPLOCKER'; Get-AppLockerPolicy -Effective -Xml; 'DEVICEGUARD'; Get-CimInstance -Namespace root/Microsoft/Windows/DeviceGuard -ClassName Win32_DeviceGuard | ConvertTo-Json -Depth 4",
+      "$ErrorActionPreference='Continue'; 'APPIDSVC'; sc.exe query AppIDSvc; 'APPLOCKER'; Get-AppLockerPolicy -Effective -Xml; 'DEVICEGUARD'; Get-CimInstance -Namespace root/Microsoft/Windows/DeviceGuard -ClassName Win32_DeviceGuard | Select-Object CodeIntegrityPolicyEnforcementStatus,UsermodeCodeIntegrityPolicyEnforcementStatus,SecurityServicesConfigured,SecurityServicesRunning | ConvertTo-Json -Depth 4",
+      f.env,
+    );
+    const modeProbe = ps(
+      "$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage'; $ExecutionContext.SessionState.LanguageMode",
       f.env,
     );
     try {
+      assert.equal(modeProbe.status, 0, JSON.stringify(modeProbe));
+      assert.equal(text(modeProbe), "ConstrainedLanguage\r\n");
       for (const mcp of [false, true]) {
         const file = wrapper(f, mcp),
           source = fs.readFileSync(file, "utf8"),
@@ -230,6 +246,7 @@ test(
     } finally {
       receipt("policy", {
         capability,
+        mode_probe: modeProbe,
         clm_rows: rows,
         application_control_gate:
           "OPEN: no blocked-host fixture has been provisioned; no global policy/service changes made",
@@ -261,13 +278,7 @@ test(
             if (fs.existsSync(name)) pids.push(Number(fs.readFileSync(name, "utf8")));
           rows.push({ mode, mcp, result: r, pids });
           try {
-            assert.equal(pids.length, 2, "both real fixture processes must have started");
-            refused(r, need(mcp ? "m5-server" : "trajecta"));
-            assert(r.elapsed_ms < 15000, "STOP: 12-second wait+drain plus host startup exceeded 15 seconds");
-            assert(
-              r.elapsed_ms >= (mode === "parent-exit" ? 1900 : 9900),
-              "real pending drain/timeout must be exercised",
-            );
+            receipt("pipe-descendant", { rows, stage: "collecting all four native rows" });
           } finally {
             for (const pid of pids)
               try {
@@ -277,6 +288,56 @@ test(
               }
           }
         }
+      const f = fixture(tool),
+        pidFile = join(f.home, "trace-pid"),
+        env = {
+          ...f.env,
+          TEST_NATIVE_MODE: "parent-exit",
+          TEST_NATIVE_RECEIPT: pidFile,
+          TRAJECTA_WRAPPER_DIR: join(f.root, "bin") + "\\",
+        };
+      let source = windowsValidator(f.root);
+      const stages = [
+        [
+          "$ok=$p.WaitForExit(10000);",
+          "[Console]::Error.WriteLine('M5 BEFORE_WAIT');$ok=$p.WaitForExit(10000);[Console]::Error.WriteLine('M5 AFTER_WAIT '+$ok);",
+        ],
+        [
+          "$d=[Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$t,2000);",
+          "[Console]::Error.WriteLine('M5 BEFORE_DRAIN');$d=[Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$t,2000);[Console]::Error.WriteLine('M5 AFTER_DRAIN '+$d);",
+        ],
+        [
+          "try{$p.Dispose()}",
+          "[Console]::Error.WriteLine('M5 BEFORE_DISPOSE');try{$p.Dispose();[Console]::Error.WriteLine('M5 AFTER_DISPOSE')}",
+        ],
+      ];
+      for (const [before, after] of stages) {
+        assert.equal(source.split(before).length, 2);
+        source = source.replace(before, after);
+      }
+      const result = ps(source, env, 20000),
+        pids: number[] = [];
+      for (const name of [pidFile, pidFile + ".child"])
+        if (fs.existsSync(name)) pids.push(Number(fs.readFileSync(name, "utf8")));
+      try {
+        receipt("pipe-diagnostic", { result, pids, stages: stages.map((x) => x[0]) });
+      } finally {
+        for (const pid of pids)
+          try {
+            process.kill(pid);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+          }
+      }
+      for (const row of rows) {
+        assert.equal(row.pids.length, 2, "both real fixture processes must have started");
+        refused(row.result, need(row.mcp ? "m5-server" : "trajecta"));
+        assert(row.result.elapsed_ms < 15000, "STOP: 12-second wait+drain plus host startup exceeded 15 seconds");
+        assert(
+          row.result.elapsed_ms >= (row.mode === "parent-exit" ? 1900 : 9900),
+          "real pending drain/timeout must be exercised",
+        );
+      }
     } finally {
       receipt("pipe-descendant", { rows });
     }
