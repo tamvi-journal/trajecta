@@ -20,6 +20,8 @@ import {
   jsonResult,
   systemPath,
   sameResult,
+  nativeCanary,
+  pipeExitDiagnostic,
 } from "./native-m5-support.ts";
 import { port } from "./view-signal-support.ts";
 
@@ -174,7 +176,7 @@ test(
   "M5 runtime fake SystemRoot PowerShell canary is runnable but never selected by either pinned wrapper",
   { skip: !native },
   () => {
-    const tool = helper(),
+    const tool = nativeCanary(),
       f = fixture(),
       fakeRoot = join(f.home, "fake-windows"),
       fake = join(fakeRoot, "System32/WindowsPowerShell/v1.0/powershell.exe"),
@@ -261,7 +263,7 @@ test(
 test(
   "M5 inherited stdout/stderr remain open in a real descendant; bounded drain never leaks bytes",
   { skip: !native },
-  () => {
+  async () => {
     const tool = helper(),
       rows = [];
     try {
@@ -315,7 +317,7 @@ test(
         assert.equal(source.split(before).length, 2);
         source = source.replace(before, after);
       }
-      const result = ps(source, env, 20000),
+      const result = await pipeExitDiagnostic(source, env, pidFile),
         pids: number[] = [];
       for (const name of [pidFile, pidFile + ".child"])
         if (fs.existsSync(name)) pids.push(Number(fs.readFileSync(name, "utf8")));
@@ -453,10 +455,11 @@ test(
         const viewArgs = ["view", "--no-browser", "--port", String(bound)];
         const commandLine = wrapped
           ? quote(application) +
-            " /d /q /c " +
+            ' /d /q /s /c "' +
             quote(join(root, "bin/trajecta.cmd")) +
             " identity " +
-            viewArgs.map(quote).join(" ")
+            viewArgs.join(" ") +
+            '"'
           : [application, join(root, "0.5.0/engines/identity/src/cli.ts"), ...viewArgs].map(quote).join(" ");
         const config = join(f.root, wrapped ? "wrapped-console.json" : "direct-console.json"),
           out = config + ".receipt";
