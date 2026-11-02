@@ -8,7 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 
-class NativeM5 {
+partial class NativeM5 {
   static JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 16777216 };
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
   static extern uint GetShortPathName(string path, StringBuilder output, uint length);
@@ -159,6 +159,7 @@ class NativeM5 {
       }
       if(args.Length>0 && args[0]=="--ancestors") { Console.WriteLine(Json.Serialize(Ancestors(UInt32.Parse(args[1]))));return 0; }
       if(args.Length>0 && args[0]=="--console") { Save(args[2],ConsoleRun(args[1]));return 0; }
+      if(args.Length>0 && args[0]=="--console-observe") { Save(args[2],ObserveConsole(args[1]));return 0; }
       string marker=Environment.GetEnvironmentVariable("TEST_NATIVE_MARKER");
       if(Environment.GetEnvironmentVariable("TEST_NATIVE_MODE")=="canary") { File.WriteAllText(marker,"canary ran\n");return 17; }
       string receipt=Environment.GetEnvironmentVariable("TEST_NATIVE_RECEIPT");
@@ -177,7 +178,7 @@ class NativeM5 {
       }
       return 99;
     } catch(Exception error) {
-      if(args.Length>2 && args[0]=="--console")Save(args[2],new {error=error.ToString()});
+      if(args.Length>2 && (args[0]=="--console" || args[0]=="--console-observe"))Save(args[2],new {error=error.ToString()});
       else Console.Error.WriteLine(error);return 1;
     }
   }

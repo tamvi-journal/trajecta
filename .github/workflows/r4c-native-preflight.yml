@@ -46,3 +46,25 @@ jobs:
         with:
           name: windows-native-m5-node${{ matrix.node }}
           path: dist/
+  console-observation:
+    name: Console observation only (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify existing engine pins
+        run: node --experimental-strip-types --input-type=module -e "import {vendor} from './tools/engine-lock.ts'; vendor(undefined, true)"
+      - name: Observe console outcomes without changing M5 acceptance
+        shell: cmd
+        run: node --experimental-strip-types --test test/windows-console-observation.test.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-console-observation-node${{ matrix.node }}
+          path: dist/

@@ -47,6 +47,7 @@ export function helper() {
       "/reference:System.Web.Extensions.dll",
       "/out:" + out,
       join(ROOT, "test/windows-m5-native.cs"),
+      join(ROOT, "test/windows-console-observe.cs"),
     ],
     isolatedEnv(home),
   );
