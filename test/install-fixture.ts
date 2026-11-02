@@ -6,7 +6,7 @@ import { tarball, unpack } from "../tools/archive.ts";
 import { sha } from "../tools/engine-lock.ts";
 import { build, releaseMetadata } from "../tools/build-release.ts";
 import { ROOT, temporary, isolatedEnv } from "./support.ts";
-let foundationPayload: Record<string, Buffer> | undefined;
+const verificationPayload: Partial<Record<"foundation" | "release", Record<string, Buffer>>> = {};
 export function testKey() {
   const keys = generateKeyPairSync("ed25519");
   const anchor = keys.publicKey.export({ type: "spki", format: "der" }).toString("base64");
@@ -24,7 +24,12 @@ export function useTestKey(key: ReturnType<typeof testKey>): void {
     },
   });
 }
-export function signedFixture(key: ReturnType<typeof testKey>, version = "0.5.0", synthetic = false) {
+export function signedFixture(
+  key: ReturnType<typeof testKey>,
+  version = "0.5.0",
+  synthetic = false,
+  artifact: "foundation" | "release" = "release",
+) {
   const root = temporary(),
     release = join(root, "release");
   fs.mkdirSync(release);
@@ -36,8 +41,10 @@ export function signedFixture(key: ReturnType<typeof testKey>, version = "0.5.0"
       "product/trajecta-extract.mjs": fs.readFileSync(join(ROOT, "product/trajecta-extract.mjs")),
     };
   else {
-    foundationPayload ??= unpack(build("foundation", false), "trajecta-0.5.0");
-    payload = { ...foundationPayload };
+    // 4c runtime fixtures exercise the six-template verification artifact. Keys remain
+    // ephemeral test-only; foundation still has no bin and has a refusal regression.
+    verificationPayload[artifact] ??= unpack(build(artifact, false), "trajecta-0.5.0");
+    payload = { ...verificationPayload[artifact] };
     delete payload["MANIFEST.json"];
     const pkg = JSON.parse(payload["product/package.json"].toString());
     pkg.version = version;
@@ -45,7 +52,7 @@ export function signedFixture(key: ReturnType<typeof testKey>, version = "0.5.0"
   }
   const manifest = {
     schema: "trajecta.manifest/v1",
-    artifact: "foundation",
+    artifact: synthetic ? "foundation" : artifact,
     version,
     node: ">=22.19 <23 || >=24 <25",
     engines: { identity: "98313ac335a533732630b2ba7039180e4bb89dcf", work: "5c696187eb5df5be7341f88296c5462488a5ae27" },

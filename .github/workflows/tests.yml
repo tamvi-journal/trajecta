@@ -29,6 +29,13 @@ jobs:
       - name: Pin checkout byte policy
         run: git config core.autocrlf false
       - name: Run complete foundation gates in isolated roots
+        if: runner.os != 'Windows'
+        env:
+          TEST_OTHER_NODE: ${{ steps.alternate.outputs.path }}
+        run: node --experimental-strip-types test/run.ts --fetch
+      - name: Run complete foundation gates in isolated roots (native cmd controller)
+        if: runner.os == 'Windows'
+        shell: cmd
         env:
           TEST_OTHER_NODE: ${{ steps.alternate.outputs.path }}
         run: node --experimental-strip-types test/run.ts --fetch

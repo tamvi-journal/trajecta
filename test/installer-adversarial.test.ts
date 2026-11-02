@@ -148,7 +148,8 @@ test("changed shared bytes stop before update-state or controls; clearing them m
     folder = join(root, "bin"),
     path = join(folder, "owned-launcher"),
     state = join(root, "update-state.json");
-  fs.mkdirSync(folder);
+  // 4c install now creates bin itself; retain the same altered-shared-file assertions.
+  fs.mkdirSync(folder, { recursive: true });
   fs.writeFileSync(path, "original");
   fs.writeFileSync(state, "keep replay state");
   const ledgerPath = join(root, "owned.json"),

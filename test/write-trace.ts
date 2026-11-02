@@ -12,7 +12,7 @@ if (process.env.TEST_WRITE_TRACE) {
   const allowed: string[] = JSON.parse(process.env.TEST_WRITE_ROOTS!);
   const engineRoot = fileURLToPath(new URL("../engines/", import.meta.url));
   let recording = false;
-  const check = (method: string, value: any) => {
+  const check = (method: string, value: any, source?: any) => {
     if (recording) return; // The trace control file is written only by the saved append function below.
     if (typeof value === "number") {
       if (value >= 0 && value <= 2) return;
@@ -45,7 +45,24 @@ if (process.env.TEST_WRITE_TRACE) {
       installRoot && fs.existsSync(resolve(installRoot, ".lock"))
         ? JSON.parse(fs.readFileSync(resolve(installRoot, ".lock"), "utf8")).pid
         : undefined;
-    const accepted = underInstall ? lockCode || installOwner === process.pid : mediated && contained;
+    const externalLink =
+      method === "linkSync" &&
+      process.platform !== "win32" &&
+      !!installRoot &&
+      installOwner === process.pid &&
+      !!process.env.TEST_EXTERNAL_LINK &&
+      path === resolve(process.env.TEST_EXTERNAL_LINK) &&
+      resolve(String(source)) === resolve(installRoot, "bin/.user-stub");
+    const output = process.env.TEST_PLUGIN_OUTPUT && resolve(process.env.TEST_PLUGIN_OUTPUT);
+    const pluginArtifact =
+      !!output &&
+      /\/product\/src\/plugin\.ts/u.test(stack) &&
+      (path === output ||
+        (dirname(path) === dirname(output) &&
+          /^\.build-[a-f0-9]{32}\.plugin$/u.test(path.slice(dirname(path).length + 1))));
+    const accepted = underInstall
+      ? lockCode || installOwner === process.pid
+      : externalLink || pluginArtifact || (mediated && contained);
     recording = true;
     try {
       append(
@@ -58,6 +75,8 @@ if (process.env.TEST_WRITE_TRACE) {
           mediated,
           accepted,
           installOwner,
+          externalLink,
+          pluginArtifact,
         }) + "\n",
       );
     } finally {
@@ -107,7 +126,7 @@ if (process.env.TEST_WRITE_TRACE) {
         original = (fs as any)[name];
       if (!original) continue;
       (fs as any)[name] = (...args: any[]) => {
-        for (const at of pairs[base] ?? [0]) check(name, args[at]);
+        for (const at of pairs[base] ?? [0]) check(name, args[at], base === "link" ? args[0] : undefined);
         return Reflect.apply(original, fs, args);
       };
     }
@@ -129,7 +148,7 @@ if (process.env.TEST_WRITE_TRACE) {
     const original = (fsp as any)[base];
     if (!original) continue;
     (fsp as any)[base] = (...args: any[]) => {
-      for (const at of pairs[base] ?? [0]) check("promises." + base, args[at]);
+      for (const at of pairs[base] ?? [0]) check("promises." + base, args[at], base === "link" ? args[0] : undefined);
       return Reflect.apply(original, fsp, args);
     };
   }
