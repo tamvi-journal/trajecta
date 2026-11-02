@@ -50,6 +50,20 @@ test(
         { id: "batch-ctrl-c-N", wrapped: true, action: "ctrl-c", answer: "N" },
         { id: "direct-window-close", wrapped: false, action: "close-window", answer: "" },
         { id: "batch-window-close", wrapped: true, action: "close-window", answer: "" },
+        {
+          id: "direct-window-close-released-handles",
+          wrapped: false,
+          action: "close-window",
+          answer: "",
+          release_console_handles: true,
+        },
+        {
+          id: "batch-window-close-released-handles",
+          wrapped: true,
+          action: "close-window",
+          answer: "",
+          release_console_handles: true,
+        },
       ];
       const quote = (s: string) => '"' + s.replaceAll('"', '\\"') + '"';
       for (const scenario of cases) {
@@ -76,6 +90,7 @@ test(
             action: scenario.action,
             answer: scenario.answer,
             meta: prefix + ".meta.json",
+            release_console_handles: "release_console_handles" in scenario && scenario.release_console_handles,
           }),
         );
         const env = {

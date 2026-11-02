@@ -94,6 +94,9 @@ partial class NativeM5 {
       window=GetConsoleWindow();Require(window!=IntPtr.Zero && IsWindow(window),"actual console window");
       if(action=="close-window") {
         // Detach the controller first: closing this window must not kill the observer.
+        if(c.ContainsKey("release_console_handles") && (bool)c["release_console_handles"]) {
+          CloseHandle(output);output=IntPtr.Zero;CloseHandle(input);input=IntPtr.Zero;
+        }
         FreeConsole();attached=false;
         Require(PostMessage(window,0x10,IntPtr.Zero,IntPtr.Zero),"post WM_CLOSE to owned console");
       } else {
