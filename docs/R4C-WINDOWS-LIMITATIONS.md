@@ -8,4 +8,4 @@ The Windows limitations below follow [identity §13.9](https://github.com/tamvi-
   - The hosted test posted `WM_CLOSE`, and the window handle disappeared.
   - The probe received no `CTRL_CLOSE_EVENT`.
   - The test harness forced cleanup of the surviving processes after recording their state.
-  - Real physical window close is NOT VERIFIED in 4c; deferred to M8 (identity §13.10). TODO: link §13.10 at the confirmed identity PR #54 merge commit.
+  - Real physical window close is NOT VERIFIED in 4c; deferred to M8 ([identity §13.10](https://github.com/tamvi-journal/trajecta-identity-memory/blob/41362ef78e2f059872b8511ca03e8d1bfc6bc22b/docs/specs/2026-10-11-r4-product-cutover.md#L926)).
