@@ -25,6 +25,24 @@ partial class NativeM5 {
   static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
   [DllImport("kernel32.dll", SetLastError=true)]
   static extern bool ProcessIdToSessionId(uint pid, out uint session);
+  [DllImport("ntdll.dll")]
+  static extern int NtQueryInformationProcess(IntPtr process, int infoClass, out UIntPtr value,
+    uint size, out uint returned);
+
+  static object PidState(uint pid, uint wait) {
+    IntPtr process=OpenProcess(0x101000,false,pid);
+    if(process==IntPtr.Zero) {
+      int error=Marshal.GetLastWin32Error();
+      if(error==87)return new {pid=pid,present=false,exited=true};
+      throw new Exception("open test process "+pid+": Win32 "+error);
+    }
+    try {
+      uint state=WaitForSingleObject(process,wait),code;
+      Require(state==0 || state==258,"wait for test process");
+      Require(GetExitCodeProcess(process,out code),"read test process status");
+      return new {pid=pid,present=true,exited=state==0,exit_unsigned=state==0?(object)code:null};
+    } finally { CloseHandle(process); }
+  }
 
   static int ConsoleCloseProbe(string prefix) {
     Handler log = delegate(uint control) {
@@ -79,7 +97,8 @@ partial class NativeM5 {
     string before="",promptScreen="",last="",failure=null;int width=0;uint engine=0;
     bool prompt=false,actionSent=false,windowClosed=false;object[] natural=null,final=null;
     int postCloseReadError=0;
-    uint observerSession=0,rootSession=0;
+    uint observerSession=0,rootSession=0,windowOwnerPid=0;
+    string hostQueryStatus=null,hostQueryValue=null;
     ObservedProcess host=null;
     object hostAtWindowGone=null,hostAtObservationEnd=null,hostAfterCleanup=null;
     try {
@@ -119,9 +138,18 @@ partial class NativeM5 {
       if(action=="close-window") {
         Require(ProcessIdToSessionId((uint)Process.GetCurrentProcess().Id,out observerSession),"observer session");
         Require(ProcessIdToSessionId(root.pid,out rootSession),"root session");
-        uint hostPid;
-        Require(GetWindowThreadProcessId(window,out hostPid)!=0,"console window host PID");
+        Require(GetWindowThreadProcessId(window,out windowOwnerPid)!=0,"console window owner PID");
+        // A message-only HWND can belong to the client. Query the console host independently.
+        // ProcessConsoleHostProcess (49) returns a PID with two low flag bits (System Informer phnt).
+        UIntPtr hostInfo;uint bytes;
+        int status=NtQueryInformationProcess(root.process,49,out hostInfo,(uint)IntPtr.Size,out bytes);
+        hostQueryStatus=unchecked((uint)status).ToString("x8");
+        hostQueryValue=hostInfo.ToUInt64().ToString("x");
+        uint hostPid=checked((uint)(hostInfo.ToUInt64() & ~3UL));
+        Require(status==0 && hostPid!=0,"query actual console host: NTSTATUS "+hostQueryStatus);
         host=new ObservedProcess(hostPid,false);
+        Require(host.name.Equals("conhost",StringComparison.OrdinalIgnoreCase) ||
+          host.name.Equals("OpenConsole",StringComparison.OrdinalIgnoreCase),"identified console host image "+host.name);
         // Detach the controller first: closing this window must not kill the observer.
         if(c.ContainsKey("release_console_handles") && (bool)c["release_console_handles"]) {
           CloseHandle(output);output=IntPtr.Zero;CloseHandle(input);input=IntPtr.Zero;
@@ -183,6 +211,8 @@ partial class NativeM5 {
       action_sent=actionSent,batch_prompt=prompt,window_gone=windowClosed,width=width,
       observer_session_id=action=="close-window"?(object)observerSession:null,
       root_session_id=action=="close-window"?(object)rootSession:null,
+      window_owner_pid=action=="close-window"?(object)windowOwnerPid:null,
+      host_query_ntstatus=hostQueryStatus,host_query_value=hostQueryValue,
       host_at_window_gone=hostAtWindowGone,host_at_observation_end=hostAtObservationEnd,host_after_cleanup=hostAfterCleanup,
       events=events,natural_processes=natural,forced_cleanup_pids=forced,final_processes=final,
       post_close_screen_error=postCloseReadError,error=failure,

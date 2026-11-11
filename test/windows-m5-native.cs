@@ -161,6 +161,9 @@ partial class NativeM5 {
       if(args.Length>0 && args[0]=="--console") { Save(args[2],ConsoleRun(args[1]));return 0; }
       if(args.Length>0 && args[0]=="--console-observe") { Save(args[2],ObserveConsole(args[1]));return 0; }
       if(args.Length>0 && args[0]=="--console-close-probe")return ConsoleCloseProbe(args[1]);
+      if(args.Length>0 && args[0]=="--pid-state") {
+        Console.WriteLine(Json.Serialize(PidState(UInt32.Parse(args[1]),UInt32.Parse(args[2]))));return 0;
+      }
       string marker=Environment.GetEnvironmentVariable("TEST_NATIVE_MARKER");
       if(Environment.GetEnvironmentVariable("TEST_NATIVE_MODE")=="canary") { File.WriteAllText(marker,"canary ran\n");return 17; }
       string receipt=Environment.GetEnvironmentVariable("TEST_NATIVE_RECEIPT");

@@ -166,15 +166,14 @@ export async function until(check: () => boolean, timeout: number, description: 
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
-export function pidAlive(pid: number): boolean {
+let pidQueryEnv: Record<string, string> | undefined;
+export function pidState(pid: number, wait = 0) {
   assert(Number.isSafeInteger(pid) && pid > 0);
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ESRCH") throw e;
-    return false;
-  }
+  pidQueryEnv ??= isolatedEnv(temporary());
+  return jsonResult(raw(helper(), ["--pid-state", String(pid), String(wait)], pidQueryEnv));
+}
+export function pidAlive(pid: number): boolean {
+  return !pidState(pid).exited;
 }
 export async function stopOwned(pid: number) {
   try {

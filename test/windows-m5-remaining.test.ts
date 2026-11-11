@@ -24,6 +24,7 @@ import {
   startNative,
   until,
   pidAlive,
+  pidState,
   stopOwned,
 } from "./native-m5-support.ts";
 import { port } from "./view-signal-support.ts";
@@ -331,7 +332,12 @@ test("M5-4 LIMITATION / UNBOUNDED WRAPPER: validator exits before inherited-pipe
             probe = fixturePid(pidFile);
           row.frame_hex = bytes.subarray(end + 1).toString("hex");
           assert.equal(bytes.subarray(end + 1).toString("ascii"), "TRJ1|ERR|NODE|END\r\n");
-          await until(() => !pidAlive(validator), 2000, "validator must exit independently of pipe holder");
+          row.validator = pidState(validator, 2000);
+          assert(
+            row.validator.exited,
+            "validator must exit independently of pipe holder: " + JSON.stringify(row.validator),
+          );
+          if (row.validator.present) assert.equal(row.validator.exit_unsigned, 0);
           row.events.push({ kind: "validator-exit-observed", pid: validator, t_ms: performance.now() - start });
           assert(row.events[0].t_ms < 15000, "bounded validator including host startup");
           assert(row.events[0].t_ms >= (mode === "parent-exit" ? 1900 : 9900));
