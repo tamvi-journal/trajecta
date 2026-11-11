@@ -146,9 +146,18 @@ try {
     Start-Service AppIDSvc
     (Get-Service AppIDSvc).WaitForStatus('Running', [TimeSpan]::FromSeconds(15))
     Set-AppLockerPolicy -XmlPolicy $policyPath
-    $effective = Get-AppLockerPolicy -Effective -Xml
+    $local = Get-AppLockerPolicy -Local -Xml
+    [IO.File]::WriteAllText((Join-Path $dist.FullName 'applocker-local.xml'), $local, $utf8)
+    $receipt.read_back = @()
+    $readBackDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $effective = Get-AppLockerPolicy -Effective -Xml
+        $exe = ([xml]$effective).SelectSingleNode('/AppLockerPolicy/RuleCollection[@Type="Exe"]')
+        $receipt.read_back += @{ utc = [DateTime]::UtcNow.ToString('O'); mode = $exe.EnforcementMode }
+        if ($exe.EnforcementMode -ceq 'Enabled') { break }
+        Start-Sleep -Seconds 1
+    } while ([DateTime]::UtcNow -lt $readBackDeadline)
     [IO.File]::WriteAllText((Join-Path $dist.FullName 'applocker-effective.xml'), $effective, $utf8)
-    $exe = ([xml]$effective).SelectSingleNode('/AppLockerPolicy/RuleCollection[@Type="Exe"]')
     $receipt.service = (Get-Service AppIDSvc).Status.ToString()
     $receipt.mode = if ($exe) { $exe.EnforcementMode } else { $null }
     Save-Evidence

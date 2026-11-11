@@ -308,7 +308,7 @@ test("M5-4 LIMITATION / UNBOUNDED WRAPPER: validator exits before inherited-pipe
         const encoded = encodePowerShell(
           source.replace(
             writeFrame,
-            '$w="TRJ1|$s|END`r`n";[IO.File]::WriteAllText($env:TEST_M5_FRAME,"$PID`n$w");[Console]::Out.Write($w)',
+            '$w="TRJ1|$s|END`r`n";[IO.File]::WriteAllText($env:TEST_M5_FRAME,"$PID`n$w");[Console]::Out.Write($w);[IO.File]::WriteAllText($env:TEST_M5_FRAME+".written",$PID)',
           ),
         );
         const observed = fs.readFileSync(file, "utf8").replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + encoded);
@@ -331,19 +331,25 @@ test("M5-4 LIMITATION / UNBOUNDED WRAPPER: validator exits before inherited-pipe
           const holder = fixturePid(pidFile + ".child"),
             probe = fixturePid(pidFile);
           row.frame_hex = bytes.subarray(end + 1).toString("hex");
+          row.frame_observed_ms = performance.now() - start;
           assert.equal(bytes.subarray(end + 1).toString("ascii"), "TRJ1|ERR|NODE|END\r\n");
-          row.validator = pidState(validator, 2000);
+          // Use one deadline for the entire validator lifetime, including host startup.
+          row.validator = pidState(validator, Math.max(0, Math.floor(15000 - (performance.now() - start))));
+          row.frame_written = fs.existsSync(frame + ".written");
+          row.before_release = proc.snapshot();
+          row.probe = pidState(probe);
+          row.holder = pidState(holder);
           assert(
             row.validator.exited,
             "validator must exit independently of pipe holder: " + JSON.stringify(row.validator),
           );
+          assert(row.frame_written, "the exact frame must have been written to the private pipe");
           if (row.validator.present) assert.equal(row.validator.exit_unsigned, 0);
           row.events.push({ kind: "validator-exit-observed", pid: validator, t_ms: performance.now() - start });
           assert(row.events[0].t_ms < 15000, "bounded validator including host startup");
           assert(row.events[0].t_ms >= (mode === "parent-exit" ? 1900 : 9900));
-          assert(!pidAlive(probe) && pidAlive(holder));
+          assert(row.probe.exited && !row.holder.exited);
           assert(!proc.exited && !proc.closed, "wrapper remains blocked before inherited-pipe EOF");
-          row.before_release = proc.snapshot();
           assert.equal(row.before_release.stdout_hex, "");
           assert.equal(row.before_release.stderr_hex, "");
           row.events.push({ kind: "terminate-owned-descendant", pid: holder, t_ms: performance.now() - start });
@@ -358,6 +364,14 @@ test("M5-4 LIMITATION / UNBOUNDED WRAPPER: validator exits before inherited-pipe
         } finally {
           for (const suffix of [".child", ""])
             if (fs.existsSync(pidFile + suffix)) await stopOwned(fixturePid(pidFile + suffix));
+          if (!proc.closed) {
+            // Keep the pre-release failure, and collect the actual post-release outcome.
+            try {
+              await until(() => proc.closed, 5000, "wrapper EOF during fixture cleanup");
+            } catch (error) {
+              row.cleanup_error = String(error);
+            }
+          }
           if (!proc.closed && proc.child.pid) await stopOwned(proc.child.pid);
           row.final = proc.snapshot();
         }
