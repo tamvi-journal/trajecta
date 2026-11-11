@@ -75,6 +75,7 @@ function Assert-Control($Row, [string] $Expected) {
 try {
     $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
     $pinned = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $appidtel = Join-Path $env:SystemRoot 'System32\appidtel.exe'
     $pwsh = Join-Path $PSHOME 'pwsh.exe'
     $nodes = @($env:TEST_M5_NODE22, $env:TEST_M5_NODE24)
     $harness = Join-Path $PWD 'test/windows-m5-applocker.ts'
@@ -116,6 +117,7 @@ try {
     $allow += @(Get-ChildItem (Join-Path $worker 'externals/node*/bin/node.exe') -File | ForEach-Object FullName)
     $allow += (Get-Command git.exe -CommandType Application | Select-Object -First 1).Source
     $allow += @(Join-Path $env:SystemRoot 'System32/conhost.exe')
+    if (Test-Path -LiteralPath $appidtel -PathType Leaf) { $allow += $appidtel }
     $allow = @($allow | Sort-Object -Unique)
     foreach ($file in $allow) {
         if (!$file -or !(Test-Path -LiteralPath $file -PathType Leaf) -or $file.Contains('*') -or $file.Contains('%')) {
@@ -148,25 +150,37 @@ try {
     Set-AppLockerPolicy -XmlPolicy $policyPath
     $local = Get-AppLockerPolicy -Local -Xml
     [IO.File]::WriteAllText((Join-Path $dist.FullName 'applocker-local.xml'), $local, $utf8)
-    $receipt.read_back = @()
-    $readBackDeadline = [DateTime]::UtcNow.AddSeconds(10)
-    do {
-        $effective = Get-AppLockerPolicy -Effective -Xml
-        $exe = ([xml]$effective).SelectSingleNode('/AppLockerPolicy/RuleCollection[@Type="Exe"]')
-        $receipt.read_back += @{ utc = [DateTime]::UtcNow.ToString('O'); mode = $exe.EnforcementMode }
-        if ($exe.EnforcementMode -ceq 'Enabled') { break }
-        Start-Sleep -Seconds 1
-    } while ([DateTime]::UtcNow -lt $readBackDeadline)
-    [IO.File]::WriteAllText((Join-Path $dist.FullName 'applocker-effective.xml'), $effective, $utf8)
-    $receipt.service = (Get-Service AppIDSvc).Status.ToString()
-    $receipt.mode = if ($exe) { $exe.EnforcementMode } else { $null }
-    Save-Evidence
-    if ($receipt.mode -cne 'Enabled' -or $receipt.service -cne 'Running') { throw 'AppLocker Enforce/service read-back failed' }
     $expectedRules = @($collection.FilePathRule | ForEach-Object { "$($_.Id)|$($_.Action)|$($_.UserOrGroupSid)|$($_.Conditions.FilePathCondition.Path)" } | Sort-Object)
-    $actualRules = @($exe.FilePathRule | ForEach-Object { "$($_.Id)|$($_.Action)|$($_.UserOrGroupSid)|$($_.Conditions.FilePathCondition.Path)" } | Sort-Object)
-    if ($exe.ChildNodes.Count -ne $expectedRules.Count -or (Compare-Object $expectedRules $actualRules)) {
-        throw 'Effective executable rules differ from the closed requested policy'
+    function Confirm-EffectivePolicy([switch] $AfterDriverStart) {
+        $samples = @()
+        $readBackDeadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $effective = Get-AppLockerPolicy -Effective -Xml
+            $exe = ([xml]$effective).SelectSingleNode('/AppLockerPolicy/RuleCollection[@Type="Exe"]')
+            $samples += @{ utc = [DateTime]::UtcNow.ToString('O'); mode = $exe.EnforcementMode }
+            if ($AfterDriverStart -or $exe.EnforcementMode -ceq 'Enabled') { break }
+            Start-Sleep -Seconds 1
+        } while ([DateTime]::UtcNow -lt $readBackDeadline)
+        $service = (Get-Service AppIDSvc).Status.ToString()
+        $mode = if ($exe) { $exe.EnforcementMode } else { $null }
+        if ($AfterDriverStart) {
+            $receipt.after_driver_read_back = @{ samples = $samples; service = $service; mode = $mode }
+            $filename = 'applocker-effective-after-driver.xml'
+        } else {
+            $receipt.read_back = $samples
+            $receipt.service = $service
+            $receipt.mode = $mode
+            $filename = 'applocker-effective.xml'
+        }
+        [IO.File]::WriteAllText((Join-Path $dist.FullName $filename), $effective, $utf8)
+        Save-Evidence
+        if ($mode -cne 'Enabled' -or $service -cne 'Running') { throw 'AppLocker Enforce/service read-back failed' }
+        $actualRules = @($exe.FilePathRule | ForEach-Object { "$($_.Id)|$($_.Action)|$($_.UserOrGroupSid)|$($_.Conditions.FilePathCondition.Path)" } | Sort-Object)
+        if ($exe.ChildNodes.Count -ne $expectedRules.Count -or (Compare-Object $expectedRules $actualRules)) {
+            throw 'Effective executable rules differ from the closed requested policy'
+        }
     }
+    Confirm-EffectivePolicy
 
     $receipt.stage = 'positive controls'
     $receipt.positive = @()
@@ -183,8 +197,20 @@ try {
     }
 
     $receipt.stage = 'pinned host deny and matching event'
-    $receipt.negative = Invoke-Control $pinned @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 'exit 0')
-    if ($receipt.negative.started -or !$receipt.negative.win32_error) { throw 'Pinned host launch was not blocked' }
+    $negativeArgs = @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 'exit 0')
+    $receipt.negative = Invoke-Control $pinned $negativeArgs
+    $negative = $receipt.negative
+    if ($negative.started) {
+        $receipt.stage = 'one AppID driver start and pinned host retry'
+        # Reuse the bounded control runner for the one authorized driver-start attempt.
+        $receipt.appidtel_start = Invoke-Control $appidtel @('start')
+        Confirm-EffectivePolicy -AfterDriverStart
+        $latest = Get-WinEvent -LogName $channel -MaxEvents 1 -ErrorAction SilentlyContinue
+        $afterRecord = if ($latest) { $latest.RecordId } else { 0 }
+        $receipt.negative_after_driver = Invoke-Control $pinned $negativeArgs
+        $negative = $receipt.negative_after_driver
+    }
+    if ($negative.started -or !$negative.win32_error) { throw 'Pinned host launch was not blocked' }
     $denyEvent = $null
     $observedDenials = @{}
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
