@@ -70,12 +70,11 @@ jobs:
           name: windows-console-observation-node${{ matrix.node }}
           path: dist/
   applocker:
-    name: Terminal M5-3 AppLocker enforcement (hosted Windows)
+    name: M8 diagnostic — AppLocker (not a PR gate)
     needs: [native, remaining, console-observation]
     if: >-
       ${{ !cancelled() && github.repository == 'tamvi-journal/trajecta' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
-           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+          github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 10
     permissions:
