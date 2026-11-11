@@ -6,7 +6,7 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 process.on("SIGINT", () => {});
 process.on("SIGTERM", () => {});
 fs.writeFileSync(config.pidFile + ".supervisor", String(process.pid));
-const child = spawn(process.execPath, config.args, { stdio: "inherit" });
+const child = spawn(config.executable ?? process.execPath, config.args, { stdio: "inherit" });
 fs.writeFileSync(config.pidFile, String(child.pid));
 child.once("error", (error) => {
   throw error;

@@ -12,6 +12,7 @@ import { identityInstall, workDoctor, runVerifiedExtractor, runStagedInstall } f
 import { checkpoint } from "./checkpoint.ts";
 import { inspect } from "../trajecta-extract.mjs";
 import { cleanupRecovery } from "./recovery.ts";
+import { stageShared, readShared, publishShared } from "./shared-effects.ts";
 
 export type Options = {
   root: string;
@@ -24,6 +25,10 @@ export type Options = {
   rollback?: boolean;
   break?: boolean;
   resumeUninstall?: boolean;
+  explicitProfile?: boolean;
+  explicitDb?: boolean;
+  userBin?: string;
+  noUserBin?: boolean;
 };
 export function defaultRoot(): string {
   return process.platform === "win32"
@@ -55,6 +60,10 @@ export function options(argv: string[]): Options {
   };
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
+    if (key === "--no-user-bin") {
+      result.noUserBin = true;
+      continue;
+    }
     if (["--rollback", "--break-lock", "--resume-uninstall"].includes(key)) {
       result[key === "--break-lock" ? "break" : key === "--resume-uninstall" ? "resumeUninstall" : "rollback"] = true;
       continue;
@@ -67,10 +76,16 @@ export function options(argv: string[]): Options {
       "--work-root": "workRoot",
       "--staged": "staged",
       "--lock-token": "token",
+      "--user-bin": "userBin",
     } as const;
     if (!(key in fields) || argv[i + 1] === undefined) throw new Error(`invalid install option: ${key}`);
     (result as any)[fields[key as keyof typeof fields]] = argv[++i];
   }
+  result.explicitProfile = argv.includes("--profile");
+  result.explicitDb = argv.includes("--db");
+  if (result.noUserBin && result.userBin) throw new Error("conflicting user-bin options");
+  if (result.userBin && !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/u.test(result.userBin))
+    throw new Error("--user-bin requires an absolute path");
   if (result.profile !== "example" && !argv.includes("--db")) throw new Error("--profile requires an explicit --db");
   for (const key of ["root", "releaseDir", "db", "workRoot", "staged"] as const)
     if (result[key]) result[key] = resolve(result[key]!);
@@ -120,6 +135,7 @@ async function committed(opts: Options, node: string, metadata: any, staged: str
   for (const name of ["release.json", "release.json.sig"])
     fs.copyFileSync(join(opts.releaseDir, name), join(source, name), fs.constants.COPYFILE_EXCL);
   checkpoint("A:node");
+  await stageShared(source, { ...opts, db: opts.explicitDb ? opts.db : undefined });
   await doctor(source, opts, true);
   checkpoint("A:doctor");
   const createdDirectories = [source, ...walk(source).filter((path) => fs.lstatSync(path).isDirectory())].map((path) =>
@@ -161,6 +177,9 @@ async function committed(opts: Options, node: string, metadata: any, staged: str
   if (!current || current[0] !== metadata.version)
     atomic(join(opts.root, "current"), Buffer.from(`${metadata.version}\n${current?.[0] ?? ""}\n`), "current");
   checkpoint("B:current");
+  const shared = readShared(folder);
+  if (shared) await publishShared(opts.root, folder, shared, data);
+  if (!opts.explicitProfile) process.stdout.write("trajecta plugin --profile <name>\n");
   if (!fs.existsSync(opts.db)) {
     checkpoint("C:bootstrap-before-effect");
     const result = await identityInstall(folder, ["--profile", opts.profile, "--db", opts.db, "init"], process.env);
@@ -257,10 +276,10 @@ export async function install(argv: string[]): Promise<number> {
       opts.root,
       "--release",
       opts.releaseDir,
-      "--db",
-      opts.db,
-      "--profile",
-      opts.profile,
+      ...(opts.explicitDb ? ["--db", opts.db] : []),
+      ...(opts.explicitProfile ? ["--profile", opts.profile] : []),
+      ...(opts.userBin ? ["--user-bin", opts.userBin] : []),
+      ...(opts.noUserBin ? ["--no-user-bin"] : []),
       "--work-root",
       opts.workRoot,
       "--lock-token",

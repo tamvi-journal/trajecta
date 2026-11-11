@@ -9,6 +9,9 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const fail = (message) => {
   throw new Error("archive refused: " + message);
 };
+// Signed metadata does not authorize unbounded memory or parser work.
+export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+export const MAX_PHYSICAL_HEADERS = 8192;
 export function safePath(value) {
   if (typeof value !== "string" || !value || value.includes("\\") || value.includes(":")) fail("unsafe path");
   const parts = value.split("/");
@@ -68,13 +71,20 @@ function pax(bytes) {
 }
 export function inspect(bytes, version) {
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/u.test(version)) fail("invalid version");
-  const tar = gunzipSync(bytes),
-    entries = [],
+  let tar;
+  try {
+    tar = gunzipSync(bytes, { maxOutputLength: MAX_OUTPUT_BYTES });
+  } catch (error) {
+    if (error?.code === "ERR_BUFFER_TOO_LARGE") fail("decompressed size limit");
+    throw error;
+  }
+  const entries = [],
     names = new Set(),
     top = `trajecta-${version}`;
   let offset = 0,
     nextPath,
-    ended = false;
+    ended = false,
+    physicalHeaders = 0;
   while (offset + 512 <= tar.length) {
     const header = tar.subarray(offset, offset + 512);
     if (header.every((byte) => byte === 0)) {
@@ -83,6 +93,7 @@ export function inspect(bytes, version) {
       ended = true;
       break;
     }
+    if (++physicalHeaders > MAX_PHYSICAL_HEADERS) fail("physical header limit");
     const checksum = octal(header.subarray(148, 156));
     let sum = 0;
     for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 32 : header[i];

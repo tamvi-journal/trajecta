@@ -1,0 +1,4 @@
+#!/bin/sh
+R='C:\golden\aa'
+[ -f "$R/bin/trajecta" ] || { printf 'trajecta: not installed at %s; run the installer, or remove %s\n' "$R" "$0" >&2; exit 1; }
+exec /bin/sh "$R/bin/trajecta" "$@"

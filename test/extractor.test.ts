@@ -135,3 +135,28 @@ test("verified extractor execution is addressed by bytes, never a stale filename
     "second",
   );
 });
+
+test("64 MiB decompression bound refuses before any staging write", () => {
+  const staging = join(temporary(), "stage");
+  const oversized = gzipSync(Buffer.alloc(64 * 1024 * 1024 + 1));
+  assert.throws(() => extract(oversized, "0.5.0", staging), /decompressed size limit/u);
+  assert(!fs.existsSync(staging));
+});
+
+test("8192 physical-header bound includes PAX metadata and precedes staging writes", () => {
+  // Empty files avoid a decompression-limit refusal hiding a header-count bug.
+  const files = Object.fromEntries(Array.from({ length: 8193 }, (_, n) => ["f" + n, Buffer.alloc(0)]));
+  const raw = gunzipSync(tarball(files, "trajecta-0.5.0"));
+  const staging = join(temporary(), "stage");
+  assert.throws(() => extract(gzipSync(raw), "0.5.0", staging), /physical header limit/u);
+  assert(!fs.existsSync(staging));
+
+  // Exactly 8192 regular headers followed by a PAX header must hit the same
+  // limit at the PAX header, before its payload is interpreted.
+  const paxHeader = Buffer.from(raw.subarray(0, 512));
+  paxHeader[156] = 120;
+  header(paxHeader, 0);
+  const withPax = Buffer.concat([raw.subarray(0, 8192 * 512), paxHeader, Buffer.alloc(1024)]);
+  assert.throws(() => extract(gzipSync(withPax), "0.5.0", staging), /physical header limit/u);
+  assert(!fs.existsSync(staging));
+});

@@ -1,6 +1,11 @@
 import { filesIn, ROOT } from "./engine-lock.ts";
 import { join } from "node:path";
 export function lintSource(file: string, source: string): void {
+  if (
+    ["product/src/plugin.ts", "product/src/plugin-generations.ts", "product/src/plugin-command.ts"].includes(file) &&
+    /\bJSON\s*\.\s*parse\s*\(/u.test(source)
+  )
+    throw new Error("lossy JSON parser at a stored plugin boundary: " + file);
   const adapter = file === "product/src/engines.ts";
   const imports = /\b(?:import\s*(?:[^;]*?\sfrom\s*)?|export\s+[^;]*?\sfrom\s*|require\s*\()["']([^"']+)["']/gu;
   for (const match of source.matchAll(imports))

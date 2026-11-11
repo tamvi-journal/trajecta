@@ -35,6 +35,18 @@ test("committed bootstrap scripts exactly match the reviewed kernel on this Node
   for (const [name, source] of Object.entries(bootstrapFiles()))
     assert.equal(fs.readFileSync(join(ROOT, "product/install", name), "utf8"), source, name);
 });
+test("4c verification release fixtures do not weaken production's foundation refusal", () => {
+  const f = signedFixture(testKey(), "0.5.0", false, "foundation"),
+    before = tree(f.root);
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", CLI, "install", "--root", join(f.root, "install"), "--release", f.release],
+    { env: { ...f.env, TEST_REFUSE_FOUNDATION: "1" }, encoding: "utf8" },
+  );
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "trajecta: foundation is not a release\n");
+  assert.deepEqual(tree(f.root), before);
+});
 test("bootstrap verifies, imports and commits under its own lock; fallback converges after current removal", () => {
   const f = signedFixture(testKey());
   let r = bootstrap(f);
@@ -133,7 +145,7 @@ test("printed external anchor verifies every recovery byte before importing anyt
   fs.writeFileSync(list, JSON.stringify(data));
   const before = tree(folder);
   let refusal = spawnSync(shell, args, { cwd: ROOT, env: f.env, encoding: "utf8" });
-  assert.notEqual(refusal.status, 0, JSON.stringify({stdout: refusal.stdout, stderr: refusal.stderr, command}));
+  assert.notEqual(refusal.status, 0, JSON.stringify({ stdout: refusal.stdout, stderr: refusal.stderr, command }));
   assert.match(refusal.stderr, /recovery digest list mismatch/);
   assert.deepEqual(tree(folder), before);
   refusal = bootstrap(f, ["--resume-uninstall"]);

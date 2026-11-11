@@ -52,14 +52,15 @@ function syncDir(path        )       {
     fs.closeSync(fd);
   }
 }
-function atomic(path        , bytes        , point        )       {
+function atomic(path        , bytes        , point        , mode = 0o600)       {
   safeRoot(dirname(path));
   regular(path);
   const tmp = path + ".tmp";
   if (regular(tmp)) fs.unlinkSync(tmp);
-  const fd = fs.openSync(tmp, "wx", 0o600);
+  const fd = fs.openSync(tmp, "wx", mode);
   try {
     fs.writeFileSync(fd, bytes);
+    fs.fchmodSync(fd, mode);
     fs.fsyncSync(fd);
   } finally {
     fs.closeSync(fd);
@@ -306,10 +307,11 @@ async function runStagedResume(staging, version, argv, token) {
 async function main() {
   if (!TRUST_ANCHOR) throw Error('no trusted release key configured');
   const argv=process.argv.slice(1), values={};
-  let resume=false;
+  let resume=false,noUserBin=false;
   for(let i=0;i<argv.length;) {
     if(argv[i]==='--resume-uninstall') {resume=true;i++;continue;}
-    if(!['--root','--release','--db','--profile','--work-root'].includes(argv[i]) || argv[i+1]===undefined)
+    if(argv[i]==='--no-user-bin') {noUserBin=true;i++;continue;}
+    if(!['--root','--release','--db','--profile','--work-root','--user-bin'].includes(argv[i]) || argv[i+1]===undefined)
       throw Error('invalid bootstrap option: '+argv[i]);
     values[argv[i]]=argv[i+1];i+=2;
   }
@@ -343,7 +345,8 @@ async function main() {
     checked.extract();
     const args=['--root',root,'--release',releaseDir];
     if(!resume)args.push('--staged',staging,'--lock-token',held.token);
-    for(const name of ['--db','--profile','--work-root']) if(values[name]!==undefined) args.push(name,values[name]);
+    for(const name of ['--db','--profile','--work-root','--user-bin']) if(values[name]!==undefined) args.push(name,values[name]);
+    if(noUserBin)args.push('--no-user-bin');
     return resume ? await runStagedResume(staging,metadata.version,args,held.token) : await runStagedInstall(staging,metadata.version,args);
   } finally {
     if(staging && fs.existsSync(staging)) fs.rmSync(staging,{recursive:true});
