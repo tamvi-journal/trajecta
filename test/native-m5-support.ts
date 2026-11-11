@@ -111,67 +111,78 @@ export function nativeCanary(): string {
   assert(fs.existsSync(exe));
   return exe;
 }
-/** A causal, test-only intervention: exit is observed before killing the pipe holder. */
-export async function pipeExitDiagnostic(source: string, env: Record<string, string>, pidFile: string) {
-  const started = performance.now(),
-    events: Array<Record<string, unknown>> = [],
-    out: Buffer[] = [],
+export function startNative(executable: string, args: string[], env: Record<string, string>) {
+  const started = performance.now();
+  const child = spawn(executable, args, { env, cwd: ROOT, stdio: "pipe" });
+  const out: Buffer[] = [],
     err: Buffer[] = [];
-  const child = spawn(powershell(), [...HOST_FLAGS, encodePowerShell(source)], { env, cwd: ROOT });
-  child.stdin.end();
-  child.stdout.on("data", (b) => {
-    out.push(Buffer.from(b));
-    events.push({ kind: "stdout", t_ms: performance.now() - started, hex: b.toString("hex") });
+  let status: number | null = null,
+    signal: NodeJS.Signals | null = null,
+    error: string | null = null;
+  let exited = false,
+    closed = false;
+  child.stdout.on("data", (b: Buffer) => out.push(b));
+  child.stderr.on("data", (b: Buffer) => err.push(b));
+  child.stdin.on("error", (e) => {
+    error = e.message;
   });
-  child.stderr.on("data", (b) => {
-    err.push(Buffer.from(b));
-    events.push({ kind: "stderr", t_ms: performance.now() - started, hex: b.toString("hex") });
+  child.on("error", (e) => {
+    error = e.message;
   });
-  child.on("exit", (code, signal) => events.push({ kind: "exit", t_ms: performance.now() - started, code, signal }));
-  const intervention = setTimeout(() => {
-    const file = pidFile + ".child";
-    if (!fs.existsSync(file)) {
-      events.push({ kind: "no-descendant-receipt", t_ms: performance.now() - started });
-      return;
-    }
-    const pid = Number(fs.readFileSync(file, "utf8"));
-    events.push({ kind: "kill-owned-descendant", t_ms: performance.now() - started, pid });
-    try {
-      process.kill(pid);
-    } catch (e) {
-      events.push({ kind: "kill-error", message: String(e) });
-    }
-  }, 8000);
-  const deadline = setTimeout(() => {
-    events.push({ kind: "diagnostic-timeout", t_ms: performance.now() - started });
-    child.kill();
-  }, 15000);
-  try {
-    const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", (code, signal) => resolve({ code, signal }));
-    });
-    events.push({ kind: "close", t_ms: performance.now() - started, ...result });
-    return {
-      ...result,
-      pid: child.pid,
-      events,
-      stdout_hex: Buffer.concat(out).toString("hex"),
-      stderr_hex: Buffer.concat(err).toString("hex"),
-    };
-  } finally {
-    clearTimeout(intervention);
-    clearTimeout(deadline);
-    for (const file of [pidFile, pidFile + ".child"])
-      if (fs.existsSync(file)) {
-        const pid = Number(fs.readFileSync(file, "utf8"));
-        try {
-          process.kill(pid);
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== "ESRCH") throw e;
-        }
-      }
+  child.once("exit", () => {
+    exited = true;
+  });
+  child.once("close", (code, sig) => {
+    status = code;
+    signal = sig;
+    closed = true;
+  });
+  return {
+    child,
+    get exited() {
+      return exited;
+    },
+    get closed() {
+      return closed;
+    },
+    snapshot() {
+      return {
+        executable,
+        args,
+        status,
+        signal,
+        error,
+        stdout_hex: Buffer.concat(out).toString("hex"),
+        stderr_hex: Buffer.concat(err).toString("hex"),
+        elapsed_ms: performance.now() - started,
+      };
+    },
+  };
+}
+export async function until(check: () => boolean, timeout: number, description: string) {
+  const end = performance.now() + timeout;
+  while (!check()) {
+    assert(performance.now() < end, description);
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
+}
+export function pidAlive(pid: number): boolean {
+  assert(Number.isSafeInteger(pid) && pid > 0);
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ESRCH") throw e;
+    return false;
+  }
+}
+export async function stopOwned(pid: number) {
+  try {
+    if (pidAlive(pid)) process.kill(pid);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ESRCH") throw e;
+  }
+  await until(() => !pidAlive(pid), 3000, "owned test PID must be gone: " + pid);
 }
 export function receipt(name: string, data: unknown) {
   fs.mkdirSync(join(ROOT, "dist"), { recursive: true });

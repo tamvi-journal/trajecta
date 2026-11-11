@@ -3,6 +3,7 @@ on:
   push:
     branches: [feat/r4c-plugin]
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -67,4 +68,39 @@ jobs:
         if: always()
         with:
           name: windows-console-observation-node${{ matrix.node }}
+          path: dist/
+  applocker:
+    name: Terminal M5-3 AppLocker enforcement (hosted Windows)
+    needs: [native, remaining, console-observation]
+    if: >-
+      ${{ !cancelled() && github.repository == 'tamvi-journal/trajecta' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Record the Node 24 executable
+        run: '"TEST_M5_NODE24=$((Get-Command node.exe).Source)" >> $env:GITHUB_ENV'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enforce the test policy and record controls before testing wrappers
+        run: |
+          $env:TEST_M5_NODE22 = (Get-Command node.exe).Source
+          ./test/windows-m5-applocker.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-m5-applocker
           path: dist/

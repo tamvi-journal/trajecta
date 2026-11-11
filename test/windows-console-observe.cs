@@ -21,13 +21,33 @@ partial class NativeM5 {
   [DllImport("user32.dll", SetLastError=true)]
   static extern bool PostMessage(IntPtr window, uint message, IntPtr word, IntPtr value);
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr window);
+  [DllImport("user32.dll", SetLastError=true)]
+  static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  static extern bool ProcessIdToSessionId(uint pid, out uint session);
+
+  static int ConsoleCloseProbe(string prefix) {
+    Handler log = delegate(uint control) {
+      File.AppendAllText(prefix+".events.jsonl",Json.Serialize(new {
+        control=control,utc=DateTime.UtcNow.ToString("O"),counter=Stopwatch.GetTimestamp()
+      })+"\n",new UTF8Encoding(false));
+      // Let the default handler perform normal termination.
+      return false;
+    };
+    Require(SetConsoleCtrlHandler(log,true),"register console close probe");
+    Save(prefix+".meta.json",new {pid=Process.GetCurrentProcess().Id,ready_utc=DateTime.UtcNow.ToString("O")});
+    Console.WriteLine("M5 CLOSE PROBE READY");
+    Thread.Sleep(60000);
+    GC.KeepAlive(log);
+    return 0;
+  }
 
   class ObservedProcess {
     public uint pid;
     public string name, created_filetime_hex;
     public IntPtr handle;
-    public ObservedProcess(uint id) {
-      pid=id;handle=OpenProcess(0x101001,false,id);
+    public ObservedProcess(uint id, bool owned=true) {
+      pid=id;handle=OpenProcess(owned?0x101001u:0x101000u,false,id);
       Require(handle!=IntPtr.Zero,"open owned console process "+id);
       try {
         name=Process.GetProcessById((int)id).ProcessName;
@@ -48,6 +68,7 @@ partial class NativeM5 {
   static object ObserveConsole(string config) {
     Dictionary<string,object> c=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(config));
     string action=(string)c["action"],answer=(string)c["answer"],meta=(string)c["meta"];
+    bool control=c.ContainsKey("plain_control") && (bool)c["plain_control"];
     Startup start=new Startup();start.cb=(uint)Marshal.SizeOf(start);ProcessInfo root;
     Require(CreateProcess((string)c["application"],new StringBuilder((string)c["command"]),IntPtr.Zero,
       IntPtr.Zero,false,0x10,IntPtr.Zero,(string)c["cwd"],ref start,out root),"new observation console");
@@ -58,6 +79,9 @@ partial class NativeM5 {
     string before="",promptScreen="",last="",failure=null;int width=0;uint engine=0;
     bool prompt=false,actionSent=false,windowClosed=false;object[] natural=null,final=null;
     int postCloseReadError=0;
+    uint observerSession=0,rootSession=0;
+    ObservedProcess host=null;
+    object hostAtWindowGone=null,hostAtObservationEnd=null,hostAfterCleanup=null;
     try {
       FreeConsole();
       while(clock.ElapsedMilliseconds<3000) {
@@ -73,12 +97,12 @@ partial class NativeM5 {
       ScreenInfo info;bool ready=false;
       while(clock.ElapsedMilliseconds<20000) {
         last=Screen(output,out info);width=info.size.x;
-        if(last.Contains("(Ctrl+C to stop)") && File.Exists(meta)){ready=true;break;}
+        if(last.Contains(control?"M5 CLOSE PROBE READY":"(Ctrl+C to stop)") && File.Exists(meta)){ready=true;break;}
         uint code;GetExitCodeProcess(root.process,out code);
         if(code!=259)throw new Exception("observation child exited before ready: "+code+" screen="+last);
         Thread.Sleep(25);
       }
-      Require(ready,"actual view readiness and preload receipt");before=last;
+      Require(ready,"console client readiness and process receipt");before=last;
       Dictionary<string,object> m=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(meta));
       engine=Convert.ToUInt32(m["pid"]);
       uint[] ids=new uint[64];uint count=GetConsoleProcessList(ids,(uint)ids.Length);
@@ -93,6 +117,11 @@ partial class NativeM5 {
       events.Add(new {kind="ready",t_ms=clock.ElapsedMilliseconds,root_pid=root.pid,engine_pid=engine});
       window=GetConsoleWindow();Require(window!=IntPtr.Zero && IsWindow(window),"actual console window");
       if(action=="close-window") {
+        Require(ProcessIdToSessionId((uint)Process.GetCurrentProcess().Id,out observerSession),"observer session");
+        Require(ProcessIdToSessionId(root.pid,out rootSession),"root session");
+        uint hostPid;
+        Require(GetWindowThreadProcessId(window,out hostPid)!=0,"console window host PID");
+        host=new ObservedProcess(hostPid,false);
         // Detach the controller first: closing this window must not kill the observer.
         if(c.ContainsKey("release_console_handles") && (bool)c["release_console_handles"]) {
           CloseHandle(output);output=IntPtr.Zero;CloseHandle(input);input=IntPtr.Zero;
@@ -103,7 +132,7 @@ partial class NativeM5 {
         Require(action=="ctrl-c","known observation action");
         Require(GenerateConsoleCtrlEvent(0,0),"real console CTRL_C_EVENT");
       }
-      actionSent=true;events.Add(new {kind="action",action=action,t_ms=clock.ElapsedMilliseconds});
+      actionSent=true;events.Add(new {kind="action",action=action,t_ms=clock.ElapsedMilliseconds,utc=DateTime.UtcNow.ToString("O")});
       Stopwatch observation=Stopwatch.StartNew();bool answered=false;
       while(observation.ElapsedMilliseconds<12000) {
         ScreenInfo current;
@@ -122,11 +151,13 @@ partial class NativeM5 {
         } else if(postCloseReadError==0)postCloseReadError=Marshal.GetLastWin32Error();
         if(!windowClosed && !IsWindow(window)) {
           windowClosed=true;events.Add(new {kind="window-gone",t_ms=clock.ElapsedMilliseconds});
+          if(host!=null)hostAtWindowGone=host.State();
         }
         bool gone=true;foreach(ObservedProcess p in clients)if(!p.Exited())gone=false;
         if(gone)break;Thread.Sleep(25);
       }
       natural=clients.ConvertAll(p=>p.State()).ToArray();
+      if(host!=null)hostAtObservationEnd=host.State();
       events.Add(new {kind="natural-observation-end",t_ms=clock.ElapsedMilliseconds});
     } catch(Exception error) { failure=error.ToString(); }
     finally {
@@ -146,9 +177,13 @@ partial class NativeM5 {
       if(output!=IntPtr.Zero && output!=new IntPtr(-1))CloseHandle(output);
       if(input!=IntPtr.Zero && input!=new IntPtr(-1))CloseHandle(input);
       if(attached)FreeConsole();CloseHandle(root.thread);CloseHandle(root.process);
+      if(host!=null) { hostAfterCleanup=host.State();CloseHandle(host.handle); }
     }
     return new {action=action,requested_answer=answer,root_pid=root.pid,engine_pid=engine,
       action_sent=actionSent,batch_prompt=prompt,window_gone=windowClosed,width=width,
+      observer_session_id=action=="close-window"?(object)observerSession:null,
+      root_session_id=action=="close-window"?(object)rootSession:null,
+      host_at_window_gone=hostAtWindowGone,host_at_observation_end=hostAtObservationEnd,host_after_cleanup=hostAfterCleanup,
       events=events,natural_processes=natural,forced_cleanup_pids=forced,final_processes=final,
       post_close_screen_error=postCloseReadError,error=failure,
       before_utf16le_base64=Convert.ToBase64String(Encoding.Unicode.GetBytes(before)),

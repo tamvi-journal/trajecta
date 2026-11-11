@@ -21,7 +21,10 @@ import {
   systemPath,
   sameResult,
   nativeCanary,
-  pipeExitDiagnostic,
+  startNative,
+  until,
+  pidAlive,
+  stopOwned,
 } from "./native-m5-support.ts";
 import { port } from "./view-signal-support.ts";
 
@@ -180,171 +183,209 @@ test(
       f = fixture(),
       fakeRoot = join(f.home, "fake-windows"),
       fake = join(fakeRoot, "System32/WindowsPowerShell/v1.0/powershell.exe"),
-      marker = join(f.home, "canary");
-    fs.mkdirSync(join(fakeRoot, "System32/WindowsPowerShell/v1.0"), { recursive: true });
-    fs.copyFileSync(tool, fake);
-    const env = {
+      marker = join(f.home, "canary"),
+      startMarker = join(temporary(), "node-starts.jsonl");
+    const warmEnv = {
       ...f.env,
-      SYSTEMROOT: fakeRoot,
+      SYSTEMROOT: systemPath(),
       TEST_NATIVE_MODE: "canary",
       TEST_NATIVE_MARKER: marker,
+      TEST_M5_NODE_START: startMarker,
+      NODE_OPTIONS: "--import=" + pathToFileURL(join(ROOT, "test/windows-m5-node-start.mjs")).href,
     };
-    const sensitivity = raw(fake, [], env);
-    receipt("pinned-canary", { sensitivity, fake, rows: [] });
-    assert.equal(sensitivity.status, 17);
-    assert(fs.existsSync(marker));
-    fs.unlinkSync(marker);
-    // Host cache is warmed with the exact changed environment too.
-    prewarmWindowsHost(powershell(), env);
-    const rows = [];
+    const env = { ...warmEnv, SYSTEMROOT: fakeRoot };
+    const differences = Object.keys(env)
+      .filter((key) => env[key] !== warmEnv[key])
+      .map((key) => ({ key, prewarm: warmEnv[key], canary: env[key] }));
+    const steps: Array<Record<string, unknown>> = [];
+    const rows: Array<Record<string, unknown>> = [];
     try {
-      for (const mcp of [false, true]) {
-        const file = wrapper(f, mcp),
-          before = tree(f.home),
-          r = command(file, argsFor(mcp), env);
-        rows.push({ mcp, result: r, marker: fs.existsSync(marker) });
-        assert.equal(r.status, 0, JSON.stringify(r));
-        assert.equal(r.stderr_hex, "");
+      const sensitivity = raw(tool, [], env);
+      steps.push({ kind: "sensitivity", result: sensitivity, marker: fs.existsSync(marker) });
+      assert.equal(sensitivity.status, 17);
+      assert.equal(fs.readFileSync(marker, "utf8"), "canary ran\n");
+      fs.unlinkSync(marker);
+
+      assert.deepEqual(
+        differences.map((d) => d.key),
+        ["SYSTEMROOT"],
+      );
+      prewarmWindowsHost(powershell(), warmEnv);
+      steps.push({ kind: "real-systemroot-prewarm", host: powershell(), status: 0 });
+      const wrappers = [wrapper(f, false), wrapper(f, true)];
+      fs.mkdirSync(join(fakeRoot, "System32/WindowsPowerShell/v1.0"), { recursive: true });
+      fs.copyFileSync(tool, fake);
+      const before = tree(f.home);
+      steps.push({ kind: "whole-tree-baseline", tree: before });
+
+      for (const [index, file] of wrappers.entries()) {
+        const mcp = index === 1;
+        const args = argsFor(mcp);
+        const r = command(file, args, env);
+        const starts = fs.existsSync(startMarker)
+          ? fs
+              .readFileSync(startMarker, "utf8")
+              .trim()
+              .split("\n")
+              .map((l) => JSON.parse(l))
+          : [];
+        const after = tree(f.home);
+        rows.push({ mcp, result: r, marker: fs.existsSync(marker), node_starts: starts, tree_after: after });
         assert(!fs.existsSync(marker));
-        assert.deepEqual(tree(f.home), before);
-      }
-    } finally {
-      receipt("pinned-canary", { sensitivity, fake, rows });
-    }
-  },
-);
-
-test(
-  "M5 native CLM refuses exactly; real application-control capability is recorded without pretending a missing host is policy",
-  { skip: !native },
-  () => {
-    const f = fixture(),
-      rows = [];
-    const capability = ps(
-      "$ErrorActionPreference='Continue'; 'APPIDSVC'; sc.exe query AppIDSvc; 'APPLOCKER'; Get-AppLockerPolicy -Effective -Xml; 'DEVICEGUARD'; Get-CimInstance -Namespace root/Microsoft/Windows/DeviceGuard -ClassName Win32_DeviceGuard | Select-Object CodeIntegrityPolicyEnforcementStatus,UsermodeCodeIntegrityPolicyEnforcementStatus,SecurityServicesConfigured,SecurityServicesRunning | ConvertTo-Json -Depth 4",
-      f.env,
-    );
-    const modeProbe = ps(
-      "$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage'; $ExecutionContext.SessionState.LanguageMode",
-      f.env,
-    );
-    try {
-      assert.equal(modeProbe.status, 0, JSON.stringify(modeProbe));
-      assert.equal(text(modeProbe), "ConstrainedLanguage\r\n");
-      for (const mcp of [false, true]) {
-        const file = wrapper(f, mcp),
-          source = fs.readFileSync(file, "utf8"),
-          encoded = encodePowerShell(
-            "$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage';" + windowsValidator(f.root),
-          );
-        fs.writeFileSync(file, source.replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + encoded));
-        prewarmWindowsHost(powershell(), f.env);
-        const before = tree(f.home),
-          r = command(file, argsFor(mcp), f.env);
-        rows.push({ mcp, result: r, source_mode: "actual ConstrainedLanguage before unchanged validator" });
-        refused(r, generic(mcp ? "m5-server" : "trajecta"));
-        assert.deepEqual(tree(f.home), before);
-      }
-    } finally {
-      receipt("policy", {
-        capability,
-        mode_probe: modeProbe,
-        clm_rows: rows,
-        application_control_gate:
-          "OPEN: no blocked-host fixture has been provisioned; no global policy/service changes made",
-      });
-    }
-    assert.fail(
-      "STOP M5-3: CLM proven; actual AppLocker/WDAC blocked-host fixture requires native policy provisioning; capability bytes recorded, not simulated",
-    );
-  },
-);
-
-test(
-  "M5 inherited stdout/stderr remain open in a real descendant; bounded drain never leaks bytes",
-  { skip: !native },
-  async () => {
-    const tool = helper(),
-      rows = [];
-    try {
-      for (const mode of ["parent-exit", "parent-hang"])
-        for (const mcp of [false, true]) {
-          const f = fixture(tool),
-            file = wrapper(f, mcp),
-            pidFile = join(f.home, "fake-pid"),
-            env = { ...f.env, TEST_NATIVE_MODE: mode, TEST_NATIVE_RECEIPT: pidFile };
-          prewarmWindowsHost(powershell(), env);
-          const r = command(file, argsFor(mcp), env, undefined, 20000),
-            pids = [];
-          for (const name of [pidFile, pidFile + ".child"])
-            if (fs.existsSync(name)) pids.push(Number(fs.readFileSync(name, "utf8")));
-          rows.push({ mode, mcp, result: r, pids });
-          try {
-            receipt("pipe-descendant", { rows, stage: "collecting all four native rows" });
-          } finally {
-            for (const pid of pids)
-              try {
-                process.kill(pid);
-              } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-              }
-          }
+        assert.deepEqual(after, before);
+        if (r.status === 1) {
+          refused(r, generic(mcp ? "m5-server" : "trajecta"));
+          assert.deepEqual(starts, []);
+        } else {
+          assert.equal(r.error, null, JSON.stringify(r));
+          assert.equal(r.status, 0, JSON.stringify(r));
+          assert.equal(r.stderr_hex, "");
+          assert.equal(text(r), JSON.stringify(mcp ? ["mcp", ...args] : args) + "\n");
+          assert.equal(starts.length, 2, "exactly the version probe and fixture engine");
         }
-      const f = fixture(tool),
-        pidFile = join(f.home, "trace-pid"),
-        env = {
-          ...f.env,
-          TEST_NATIVE_MODE: "parent-exit",
-          TEST_NATIVE_RECEIPT: pidFile,
-          TRAJECTA_WRAPPER_DIR: join(f.root, "bin") + "\\",
-        };
-      let source = windowsValidator(f.root);
-      const stages = [
-        [
-          "$ok=$p.WaitForExit(10000);",
-          "[Console]::Error.WriteLine('M5 BEFORE_WAIT');$ok=$p.WaitForExit(10000);[Console]::Error.WriteLine('M5 AFTER_WAIT '+$ok);",
-        ],
-        [
-          "$d=[Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$t,2000);",
-          "[Console]::Error.WriteLine('M5 BEFORE_DRAIN');$d=[Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$t,2000);[Console]::Error.WriteLine('M5 AFTER_DRAIN '+$d);",
-        ],
-        [
-          "try{$p.Dispose()}",
-          "[Console]::Error.WriteLine('M5 BEFORE_DISPOSE');try{$p.Dispose();[Console]::Error.WriteLine('M5 AFTER_DISPOSE')}",
-        ],
-      ];
-      for (const [before, after] of stages) {
-        assert.equal(source.split(before).length, 2);
-        source = source.replace(before, after);
-      }
-      const result = await pipeExitDiagnostic(source, env, pidFile),
-        pids: number[] = [];
-      for (const name of [pidFile, pidFile + ".child"])
-        if (fs.existsSync(name)) pids.push(Number(fs.readFileSync(name, "utf8")));
-      try {
-        receipt("pipe-diagnostic", { result, pids, stages: stages.map((x) => x[0]) });
-      } finally {
-        for (const pid of pids)
-          try {
-            process.kill(pid);
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-          }
-      }
-      for (const row of rows) {
-        assert.equal(row.pids.length, 2, "both real fixture processes must have started");
-        refused(row.result, need(row.mcp ? "m5-server" : "trajecta"));
-        assert(row.result.elapsed_ms < 15000, "STOP: 12-second wait+drain plus host startup exceeded 15 seconds");
-        assert(
-          row.result.elapsed_ms >= (row.mode === "parent-exit" ? 1900 : 9900),
-          "real pending drain/timeout must be exercised",
-        );
+        if (fs.existsSync(startMarker)) fs.unlinkSync(startMarker);
       }
     } finally {
-      receipt("pipe-descendant", { rows });
+      receipt("pinned-canary", { fake, environment_differences: differences, steps, rows });
     }
   },
 );
+
+test("M5 native CLM refuses exactly", { skip: !native }, () => {
+  const f = fixture(),
+    rows = [];
+  const modeProbe = ps(
+    "$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage'; $ExecutionContext.SessionState.LanguageMode",
+    f.env,
+  );
+  try {
+    assert.equal(modeProbe.status, 0, JSON.stringify(modeProbe));
+    assert.equal(text(modeProbe), "ConstrainedLanguage\r\n");
+    for (const mcp of [false, true]) {
+      const file = wrapper(f, mcp),
+        source = fs.readFileSync(file, "utf8"),
+        encoded = encodePowerShell(
+          "$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage';" + windowsValidator(f.root),
+        );
+      fs.writeFileSync(file, source.replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + encoded));
+      prewarmWindowsHost(powershell(), f.env);
+      const before = tree(f.home),
+        r = command(file, argsFor(mcp), f.env);
+      rows.push({ mcp, result: r, source_mode: "actual ConstrainedLanguage before unchanged validator" });
+      refused(r, generic(mcp ? "m5-server" : "trajecta"));
+      assert.deepEqual(tree(f.home), before);
+    }
+  } finally {
+    receipt("policy", {
+      mode_probe: modeProbe,
+      clm_rows: rows,
+      application_control_gate: "dedicated terminal AppLocker job",
+    });
+  }
+});
+
+function fixturePid(file: string) {
+  return Number(fs.readFileSync(file, "utf8"));
+}
+
+test("M5-4 LIMITATION / UNBOUNDED WRAPPER: validator exits before inherited-pipe EOF", { skip: !native }, async () => {
+  const tool = helper(),
+    rows: Array<Record<string, any>> = [];
+  try {
+    for (const mode of ["parent-exit", "parent-hang"]) {
+      for (const mcp of [false, true]) {
+        const f = fixture(tool),
+          file = wrapper(f, mcp),
+          pidFile = join(f.home, "fake-pid"),
+          frame = join(f.home, "validator-frame"),
+          env = { ...f.env, TEST_NATIVE_MODE: mode, TEST_NATIVE_RECEIPT: pidFile, TEST_M5_FRAME: frame };
+        prewarmWindowsHost(powershell(), env);
+        const source = windowsValidator(f.root);
+        const writeFrame = '[Console]::Out.Write("TRJ1|$s|END`r`n")';
+        assert.equal(source.split(writeFrame).length, 2);
+        // Record the exact string written into FOR /F's private pipe, and its writer PID.
+        const encoded = encodePowerShell(
+          source.replace(
+            writeFrame,
+            '$w="TRJ1|$s|END`r`n";[IO.File]::WriteAllText($env:TEST_M5_FRAME,"$PID`n$w");[Console]::Out.Write($w)',
+          ),
+        );
+        const observed = fs.readFileSync(file, "utf8").replace(/(-EncodedCommand )[A-Za-z0-9+/=]+/u, "$1" + encoded);
+        assert(observed.split(/\r?\n/u).every((line) => line.length <= 8000));
+        fs.writeFileSync(file, observed);
+        const start = performance.now();
+        const proc = startNative(systemPath("System32/cmd.exe"), ["/d", "/q", "/c", file, ...argsFor(mcp)], env);
+        proc.child.stdin.end();
+        const row: Record<string, any> = { mode, mcp, events: [] };
+        rows.push(row);
+        try {
+          await until(
+            () => fs.existsSync(frame) && fs.existsSync(pidFile + ".child"),
+            15000,
+            "validator frame and child receipts",
+          );
+          const bytes = fs.readFileSync(frame);
+          const end = bytes.indexOf(10);
+          const validator = Number(bytes.subarray(0, end).toString("ascii"));
+          const holder = fixturePid(pidFile + ".child"),
+            probe = fixturePid(pidFile);
+          row.frame_hex = bytes.subarray(end + 1).toString("hex");
+          assert.equal(bytes.subarray(end + 1).toString("ascii"), "TRJ1|ERR|NODE|END\r\n");
+          await until(() => !pidAlive(validator), 2000, "validator must exit independently of pipe holder");
+          row.events.push({ kind: "validator-exit-observed", pid: validator, t_ms: performance.now() - start });
+          assert(row.events[0].t_ms < 15000, "bounded validator including host startup");
+          assert(row.events[0].t_ms >= (mode === "parent-exit" ? 1900 : 9900));
+          assert(!pidAlive(probe) && pidAlive(holder));
+          assert(!proc.exited && !proc.closed, "wrapper remains blocked before inherited-pipe EOF");
+          row.before_release = proc.snapshot();
+          assert.equal(row.before_release.stdout_hex, "");
+          assert.equal(row.before_release.stderr_hex, "");
+          row.events.push({ kind: "terminate-owned-descendant", pid: holder, t_ms: performance.now() - start });
+          await stopOwned(holder);
+          await until(() => proc.closed, 5000, "wrapper must return cleanly after descendant termination");
+          row.events.push({ kind: "wrapper-eof", t_ms: performance.now() - start });
+          row.result = proc.snapshot();
+          refused(row.result, need(mcp ? "m5-server" : "trajecta"));
+          assert(!fs.existsSync(pidFile + ".engine"), "fixture engine must never start");
+          row.all_test_pids_gone = [validator, holder, probe, proc.child.pid!].every((pid) => !pidAlive(pid));
+          assert(row.all_test_pids_gone);
+        } finally {
+          for (const suffix of [".child", ""])
+            if (fs.existsSync(pidFile + suffix)) await stopOwned(fixturePid(pidFile + suffix));
+          if (!proc.closed && proc.child.pid) await stopOwned(proc.child.pid);
+          row.final = proc.snapshot();
+        }
+      }
+    }
+  } finally {
+    receipt("pipe-descendant", { disposition: "LIMITATION / UNBOUNDED WRAPPER (validator bounded)", rows });
+  }
+});
+
+test("M5-4 hung version probe without a descendant returns after the bounded wait", { skip: !native }, async () => {
+  const rows = [];
+  try {
+    for (const mcp of [false, true]) {
+      const f = fixture(helper()),
+        file = wrapper(f, mcp),
+        pidFile = join(f.home, "fake-pid"),
+        env = { ...f.env, TEST_NATIVE_MODE: "hang-alone", TEST_NATIVE_RECEIPT: pidFile };
+      prewarmWindowsHost(powershell(), env);
+      const r = command(file, argsFor(mcp), env, undefined, 15000);
+      rows.push({ mcp, result: r });
+      try {
+        refused(r, need(mcp ? "m5-server" : "trajecta"));
+        assert(r.elapsed_ms >= 9900 && r.elapsed_ms < 15000, "10 s wait + 2 s drain, with up to 3 s host startup");
+        assert(!fs.existsSync(pidFile + ".child") && !fs.existsSync(pidFile + ".engine"));
+        assert(!pidAlive(fixturePid(pidFile)), "hung fixture probe must be gone");
+      } finally {
+        if (fs.existsSync(pidFile)) await stopOwned(fixturePid(pidFile));
+      }
+    }
+  } finally {
+    receipt("pipe-no-descendant", { rows });
+  }
+});
 
 function actualInstalledMcp(long: boolean) {
   const f = signedFixture(testKey()),
@@ -431,7 +472,7 @@ test("M5 240-character non-ASCII install root runs CLI and actual engine MCP; >8
 );
 
 test(
-  "M5 real Windows console Ctrl-C direct versus installed batch launcher, including the actual batch prompt",
+  "M5-8 declared Windows limitation: the batch Y prompt exits 255 after engine Ctrl-C",
   { skip: !native },
   async () => {
     const tool = helper(),
@@ -473,19 +514,127 @@ test(
       const direct = rows[0].evidence,
         wrapped = rows[1].evidence;
       assert.equal(direct.exit_unsigned, 0, "real direct engine handles console Ctrl-C gracefully");
-      assert.equal(
-        wrapped.exit_unsigned,
-        direct.exit_unsigned,
-        "STOP M5-8: observed console exit differs; raw screen and prompt recorded, requires declared-limitation decision",
-      );
-      assert.equal(
-        wrapped.batch_prompt,
-        direct.batch_prompt,
-        "STOP M5-8: observed batch prompt differs; raw screen recorded, requires declared-limitation decision",
-      );
-      assert.equal(wrapped.after_utf16le_base64, direct.after_utf16le_base64);
+      assert.equal(wrapped.exit_unsigned, 255);
+      assert.equal(direct.batch_prompt, false);
+      assert.equal(wrapped.batch_prompt, true);
+      assert.equal(wrapped.answer, "Y");
+      const lines = (base64: string, width: number) => {
+        const screen = Buffer.from(base64, "base64").toString("utf16le");
+        const result: string[] = [];
+        for (let i = 0; i < screen.length; i += width) {
+          const line = screen.slice(i, i + width).trimEnd();
+          if (line) result.push(line);
+        }
+        return result;
+      };
+      const ready = lines(direct.before_utf16le_base64, direct.width);
+      assert.deepEqual(lines(wrapped.before_utf16le_base64, wrapped.width), ready);
+      assert.deepEqual(lines(direct.after_utf16le_base64, direct.width), ready);
+      assert.deepEqual(lines(wrapped.after_utf16le_base64, wrapped.width), [...ready, "Terminate batch job (Y/N)? Y"]);
     } finally {
-      receipt("console-ctrl-c", { install, rows });
+      receipt("console-ctrl-c", { disposition: "declared Windows limitation", install, rows });
     }
   },
 );
+
+test("M5-8 piped MCP initialize, then stdin EOF, matches the direct engine", { skip: !native }, async () => {
+  const f = signedFixture(testKey()),
+    root = join(f.root, "install");
+  const env = { ...f.env, NODE_NO_WARNINGS: "1" };
+  const install = raw(
+    process.execPath,
+    [CLI, "install", "--root", root, "--release", f.release, "--no-user-bin"],
+    env,
+    undefined,
+    60000,
+  );
+  const rows: Array<Record<string, any>> = [];
+  try {
+    assert.equal(install.status, 0, JSON.stringify(install));
+    prewarmWindowsHost(powershell(), env);
+    const before = tree(root);
+    const request =
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"native-m5-eof","version":"1"}}}\n';
+    for (const engine of ["identity", "work"]) {
+      const pair = [];
+      for (const wrapped of [false, true]) {
+        const marker = join(f.root, `${engine}-${wrapped ? "batch" : "direct"}-eof.json`);
+        const entry = join(
+          root,
+          "0.5.0/engines",
+          engine === "identity" ? "identity/src/mcp.ts" : "work/src/mcp-server.ts",
+        );
+        const engineArgs = engine === "identity" ? ["--profile", "example"] : [];
+        const observedEnv = {
+          ...env,
+          NODE_OPTIONS: "--import=" + pathToFileURL(join(ROOT, "test/native-m5-entry-observer.ts")).href,
+          TEST_M5_NATIVE_TOOL: helper(),
+          TEST_M5_ENTRY_RECEIPT: marker,
+        };
+        const proc = wrapped
+          ? startNative(
+              systemPath("System32/cmd.exe"),
+              [
+                "/d",
+                "/q",
+                "/c",
+                join(root, "bin/trajecta-mcp.cmd"),
+                "m5-" + engine,
+                "--engine",
+                engine,
+                "--",
+                ...engineArgs,
+              ],
+              observedEnv,
+            )
+          : startNative(process.execPath, [entry, ...engineArgs], observedEnv);
+        const row: Record<string, any> = { engine, wrapped, request_hex: Buffer.from(request).toString("hex") };
+        rows.push(row);
+        pair.push(row);
+        proc.child.stdin.write(request);
+        try {
+          await until(
+            () => text(proc.snapshot()).includes("\n") || proc.closed,
+            20000,
+            "initialize response before stdin EOF",
+          );
+          row.before_eof = proc.snapshot();
+          assert(!proc.closed && !proc.exited, JSON.stringify(row));
+          assert(fs.existsSync(marker), "actual engine entry receipt");
+          row.entry = JSON.parse(fs.readFileSync(marker, "utf8"));
+          assert.equal(row.entry.entry, pathToFileURL(entry).href);
+          row.engine_alive_before_eof = pidAlive(row.entry.pid);
+          assert(row.engine_alive_before_eof);
+          const response = text(row.before_eof);
+          assert.equal(response.split("\n").length, 2);
+          const parsed = JSON.parse(response);
+          assert.equal(parsed.id, 1);
+          assert(parsed.result && !parsed.error);
+          row.stdin_closed_ms = performance.now();
+          proc.child.stdin.end();
+          await until(() => proc.closed, 10000, "MCP exit and pipe EOF after closing stdin");
+          row.result = proc.snapshot();
+          row.engine_alive_after_eof = pidAlive(row.entry.pid);
+          assert.equal(row.result.status, 0, JSON.stringify(row));
+          assert.equal(row.result.error, null);
+          assert.equal(row.result.signal, null);
+          assert.equal(row.result.stdout_hex, row.before_eof.stdout_hex);
+          assert.equal(row.result.stderr_hex, "");
+          assert.equal(row.engine_alive_after_eof, false);
+        } finally {
+          if (!proc.closed) {
+            proc.child.stdin.destroy();
+            if (fs.existsSync(marker)) await stopOwned(JSON.parse(fs.readFileSync(marker, "utf8")).pid);
+            if (proc.child.pid) await stopOwned(proc.child.pid);
+          }
+          row.final = proc.snapshot();
+        }
+      }
+      sameResult(pair[0].result, pair[1].result);
+      assert.deepEqual(pair[0].entry.argv, pair[1].entry.argv);
+    }
+    assert.deepEqual(tree(root), before);
+  } finally {
+    receipt("mcp-stdin-eof", { install, rows });
+  }
+});

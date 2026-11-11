@@ -160,9 +160,13 @@ partial class NativeM5 {
       if(args.Length>0 && args[0]=="--ancestors") { Console.WriteLine(Json.Serialize(Ancestors(UInt32.Parse(args[1]))));return 0; }
       if(args.Length>0 && args[0]=="--console") { Save(args[2],ConsoleRun(args[1]));return 0; }
       if(args.Length>0 && args[0]=="--console-observe") { Save(args[2],ObserveConsole(args[1]));return 0; }
+      if(args.Length>0 && args[0]=="--console-close-probe")return ConsoleCloseProbe(args[1]);
       string marker=Environment.GetEnvironmentVariable("TEST_NATIVE_MARKER");
       if(Environment.GetEnvironmentVariable("TEST_NATIVE_MODE")=="canary") { File.WriteAllText(marker,"canary ran\n");return 17; }
       string receipt=Environment.GetEnvironmentVariable("TEST_NATIVE_RECEIPT");
+      if(receipt!=null && args.Length!=1) {
+        File.WriteAllText(receipt+".engine",String.Join(" ",args));return 98;
+      }
       if(args.Length>0 && args[0]=="--pipe-child") {
         File.WriteAllText(receipt+".child",Process.GetCurrentProcess().Id.ToString());
         Console.Out.Write("DESCENDANT_OUT_MUST_NOT_LEAK");Console.Error.Write("DESCENDANT_ERR_MUST_NOT_LEAK");
@@ -170,6 +174,7 @@ partial class NativeM5 {
       }
       if(args.Length==1 && args[0]=="--version") {
         File.WriteAllText(receipt,Process.GetCurrentProcess().Id.ToString());
+        if(Environment.GetEnvironmentVariable("TEST_NATIVE_MODE")=="hang-alone") { Thread.Sleep(60000);return 0; }
         ProcessStartInfo child=new ProcessStartInfo(Process.GetCurrentProcess().MainModule.FileName,"--pipe-child");
         child.UseShellExecute=false; child.CreateNoWindow=true; Process.Start(child);
         Console.Out.Write("PARENT_OUT_MUST_NOT_LEAK");Console.Error.Write("PARENT_ERR_MUST_NOT_LEAK");

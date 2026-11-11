@@ -42,6 +42,7 @@ test(
       60000,
     );
     const rows: Array<Record<string, any>> = [];
+    let closeControl: Record<string, any> | undefined;
     try {
       assert.equal(installed.status, 0, JSON.stringify(installed));
       const cases = [
@@ -120,11 +121,71 @@ test(
           port_after_harness_cleanup: portState,
         });
         receipt("console-observation", {
-          scope: "observation only; PR53 unmerged; M5 acceptance unchanged",
+          scope: "§13.9 M5-8 console observations",
           installed,
           rows,
         });
       }
+      const prefix = join(f.root, "plain-console-close");
+      const application = systemPath("System32/cmd.exe");
+      const command = `${quote(application)} /d /q /k "${quote(tool)} --console-close-probe ${quote(prefix)}"`;
+      const config = prefix + ".config.json",
+        result = prefix + ".result.json",
+        eventLog = prefix + ".events.jsonl";
+      fs.writeFileSync(
+        config,
+        JSON.stringify({
+          application,
+          command,
+          cwd: f.root,
+          action: "close-window",
+          answer: "",
+          meta: prefix + ".meta.json",
+          plain_control: true,
+          release_console_handles: true,
+        }),
+      );
+      const run = raw(tool, ["--console-observe", config, result], installEnv, undefined, 50000);
+      const evidence = fs.existsSync(result) ? JSON.parse(fs.readFileSync(result, "utf8")) : null;
+      const eventBytes = fs.existsSync(eventLog) ? fs.readFileSync(eventLog) : Buffer.alloc(0);
+      const controlEvents = eventBytes
+        .toString("utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      closeControl = { command, run, evidence, events_hex: eventBytes.toString("hex"), control_events: controlEvents };
+      assert.equal(run.status, 0, JSON.stringify(closeControl));
+      assert.equal(evidence?.error, null, JSON.stringify(closeControl));
+      assert(evidence.action_sent && evidence.window_gone && evidence.host_at_window_gone);
+      assert(Number.isInteger(evidence.observer_session_id) && Number.isInteger(evidence.root_session_id));
+      assert(evidence.final_processes.every((p: any) => p.exited));
+      const plainRoot = evidence.natural_processes.find((p: any) => p.pid === evidence.root_pid);
+      const probe = evidence.natural_processes.find((p: any) => p.pid === evidence.engine_pid);
+      assert(plainRoot && probe && plainRoot.pid !== probe.pid);
+      const closeReceived = controlEvents.some((e) => e.control === 2);
+      const engineSurvives = rows
+        .filter((row) => row.action === "close-window")
+        .some((row) => row.evidence?.natural_processes.some((p: any) => p.pid === row.meta?.pid && !p.exited));
+      const closeParity = [false, true].every((released) => {
+        const pair = rows.filter((row) => row.action === "close-window" && !!row.release_console_handles === released);
+        const outcomes = pair.map((row) => row.evidence?.natural_processes.find((p: any) => p.pid === row.meta?.pid));
+        return (
+          outcomes.length === 2 &&
+          outcomes.every(Boolean) &&
+          outcomes[0].exited === outcomes[1].exited &&
+          outcomes[0].exit_unsigned === outcomes[1].exit_unsigned
+        );
+      });
+      closeControl.disposition =
+        !plainRoot.exited || !closeReceived
+          ? closeParity
+            ? "window close: not reproducible on hosted runner, direct/wrapped parity observed; M8 physical-close check"
+            : "STOP: direct/wrapped close outcomes differ"
+          : engineSurvives
+            ? "STOP: plain control received CTRL_CLOSE_EVENT and exited, but a Node engine survived"
+            : "native close delivered CTRL_CLOSE_EVENT; process outcomes recorded";
+      assert(!closeControl.disposition.startsWith("STOP:"), closeControl.disposition);
       // Assert successful measurement and safe harness cleanup, not a proposed
       // exit-code/prompt/natural-cleanup law. Every observed value stays in raw data.
       for (const row of rows) {
@@ -147,9 +208,10 @@ test(
       }
     } finally {
       receipt("console-observation", {
-        scope: "observation only; PR53 unmerged; M5 acceptance unchanged",
+        scope: "§13.9 M5-8 console observations",
         installed,
         rows,
+        close_control: closeControl,
       });
     }
   },
