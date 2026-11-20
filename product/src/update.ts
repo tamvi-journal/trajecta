@@ -47,7 +47,7 @@ export async function update(argv: string[]): Promise<number> {
     if (!(await confirmation("Type RESET UPDATE STATE: ", "RESET UPDATE STATE")))
       throw new Error("update state reset declined");
   } else readState(root, TRUST_ANCHOR);
-  if (!check && !reset) throw new Error("update stage and switch requires 4d-2; use update --check");
+  if (!check && !reset) throw new Error("update installation is not available in this build; use update --check");
   const fetched = await fetchIndex(from);
   if (check) {
     const decision = decideIndex(fetched.bytes, fetched.signature, readState(root, TRUST_ANCHOR), TRUST_ANCHOR);
