@@ -1,4 +1,7 @@
 import * as fs from "node:fs";
+import { hostname } from "node:os";
+import { owner } from "./install-lock.ts";
+import { TRUST_ANCHOR } from "./trust.ts";
 import { join } from "node:path";
 import { createPublicKey, verify } from "node:crypto";
 import { canonical, parseCanonical, fields, positiveSequence } from "./update-json.ts";
@@ -107,8 +110,15 @@ export function readState(root: string, anchor: string): UpdateState {
     throw new Error(STATE_RECOVERY);
   }
 }
+function requireStateLock(root: string): void {
+  const path = join(root, ".lock");
+  const held = regular(path) ? owner(fs.readFileSync(path)) : null;
+  if (!held || held.pid !== process.pid || held.hostname !== hostname())
+    throw new Error("update state write requires the owning install lock");
+}
 /** Called only while the caller owns the install lock. Never used by --check. */
 export function clearStateTemp(root: string): void {
+  requireStateLock(root);
   const path = join(root, "update-state.json.tmp");
   if (regular(path)) {
     fs.unlinkSync(path);
@@ -197,4 +207,12 @@ export function resetIndex(bytes: Buffer, signature: string, manifestFloor: numb
     rotations: index.rotations,
   };
   return { index, state, keys, known: false };
+}
+
+/** Step 7, for the update writer. The caller already owns the single install lock. */
+export function acceptIndex(root: string, bytes: Buffer, signature: string) {
+  requireStateLock(root);
+  const decision = decideIndex(bytes, signature, readState(root, TRUST_ANCHOR), TRUST_ANCHOR);
+  if (!decision.known) writeState(root, decision.state);
+  return decision;
 }

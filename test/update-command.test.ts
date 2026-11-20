@@ -227,3 +227,53 @@ test("reset state write crashes are atomic and known-index rechecks never rewrit
     assert.deepEqual(tree(join(f.root, "install")), before);
   }
 });
+
+test("normal index acceptance persists paired sequence/digest; known rotation-bearing replay survives each state-write crash", () => {
+  const nextKey = testKey();
+  const body = { schema: "trajecta.rotation/v1", from: key.anchor, to: nextKey.anchor, sequence: 20 };
+  const rotation = { ...body, signature: key.sign(Buffer.from(canonical(body))).trim() };
+  for (const point of ["update-state:before-rename", "update-state:after-rename"]) {
+    const f = fixture();
+    assert.equal(install(f).status, 0);
+    const i = publish(f, 20, [rotation]),
+      worker = join(f.root, "accept.mjs");
+    fs.writeFileSync(
+      worker,
+      `import fs from "node:fs";
+      import {acceptIndex} from ${JSON.stringify(new URL("../product/src/update-state.ts", import.meta.url).href)};
+      import {acquire,release} from ${JSON.stringify(new URL("../product/src/install-lock.ts", import.meta.url).href)};
+      const [root,source]=process.argv.slice(2),held=acquire(root);
+      try{acceptIndex(root,fs.readFileSync(source+"/index.json"),fs.readFileSync(source+"/index.json.sig","utf8"));}
+      finally{release(root,".lock",held);}`,
+    );
+    const root = join(f.root, "install");
+    let r = spawnSync(process.execPath, ["--experimental-strip-types", worker, root, i.directory], {
+      env: { ...f.env, TEST_KILL_AT: point },
+      encoding: "utf8",
+    });
+    assert.notEqual(r.status, 0);
+    const persisted = state(f);
+    if (point.endsWith("before-rename")) assert.equal(persisted.accepted, null);
+    else {
+      assert.equal(persisted.accepted!.sequence, 20);
+      assert.equal(persisted.rotations.length, 1);
+    }
+    r = spawnSync(process.execPath, ["--experimental-strip-types", worker, root, i.directory], {
+      env: f.env,
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(state(f).rotations.length, 1);
+    const before = tree(root),
+      stamp = fs.statSync(join(root, "update-state.json"), { bigint: true }).mtimeNs;
+    // Known K0-signed I20 is accepted after K1 became newest, without rechecking its signature.
+    fs.writeFileSync(join(i.directory, "index.json.sig"), "invalid");
+    r = spawnSync(process.execPath, ["--experimental-strip-types", worker, root, i.directory], {
+      env: f.env,
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(tree(root), before);
+    assert.equal(fs.statSync(join(root, "update-state.json"), { bigint: true }).mtimeNs, stamp);
+  }
+});
