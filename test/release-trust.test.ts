@@ -52,7 +52,7 @@ test("build derives the signed MANIFEST digest from its exact packed bytes", () 
   assert.equal(f.metadata.manifest_sha256, sha(unpack(f.archive, "trajecta-0.5.0")["MANIFEST.json"]));
   assert.equal(f.metadata.manifest_sha256, sha(f.manifestBytes));
   assert.notEqual(f.metadata.manifest_sha256, sha(Buffer.from(JSON.stringify(f.manifest))));
-  assert.deepEqual(verifyMetadata(f.bytes, f.signature + "\n"), f.metadata);
+  assert.deepEqual(verifyMetadata(f.bytes, f.signature + "\n", [anchor]), f.metadata);
   assert.deepEqual(authenticateManifest(f.manifestBytes, f.metadata, "extracted"), f.manifest);
 });
 test("signed metadata must contain a valid MANIFEST digest", () => {
@@ -60,7 +60,7 @@ test("signed metadata must contain a valid MANIFEST digest", () => {
     const metadata = { ...fixture().metadata, manifest_sha256: value };
     const bytes = Buffer.from(JSON.stringify(metadata));
     assert.throws(
-      () => verifyMetadata(bytes, sign(null, bytes, key.privateKey).toString("base64")),
+      () => verifyMetadata(bytes, sign(null, bytes, key.privateKey).toString("base64"), [anchor]),
       /invalid release metadata/u,
     );
   }
@@ -76,7 +76,7 @@ test("bad signature, wrong key, truncated signature and non-base64 refuse", () =
     [f.bytes, Buffer.alloc(63).toString("base64")],
     [f.bytes, "not base64!"],
   ] as const)
-    assert.throws(() => verifyMetadata(bytes, signature), /signature|base64/u);
+    assert.throws(() => verifyMetadata(bytes, signature, [anchor]), /signature|base64/u);
 });
 test("extracted MANIFEST mismatch refuses before parsing even if semantically identical", () => {
   const f = fixture();
@@ -97,7 +97,7 @@ test("installed MANIFEST and owned.json co-tamper cannot replace the signed trus
   fs.writeFileSync(join(folder, "release.json"), f.bytes);
   fs.writeFileSync(join(folder, "release.json.sig"), f.signature + "\n");
   fs.writeFileSync(join(folder, "node"), process.execPath + "\n");
-  verifyVersion(folder);
+  verifyVersion(folder, [anchor]);
   const modified = Buffer.from("export const value=2;\n");
   f.manifest.files["product/src/example.ts"] = { size: modified.length, sha256: sha(modified) };
   const forgedManifest = Buffer.from(JSON.stringify(f.manifest, null, 2) + "\n");
@@ -116,6 +116,6 @@ test("installed MANIFEST and owned.json co-tamper cannot replace the signed trus
     }),
   );
   const before = tree(root);
-  assert.throws(() => verifyVersion(folder), /^Error: stored MANIFEST digest mismatch$/u);
+  assert.throws(() => verifyVersion(folder, [anchor]), /^Error: stored MANIFEST digest mismatch$/u);
   assert.deepEqual(tree(root), before);
 });

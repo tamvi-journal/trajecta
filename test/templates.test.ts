@@ -99,8 +99,8 @@ test("§13.6 canonical six-template table drives release inventory and two ident
     "user-stub.sh.tmpl",
     "validator.ps1.tmpl",
   ]);
-  const a = build("release", false),
-    b = build("release", false);
+  const a = build("release", false, undefined, 1),
+    b = build("release", false, undefined, 1);
   assert.deepEqual(a, b);
   const files = unpack(a, "trajecta-0.5.0"),
     manifest = JSON.parse(files["MANIFEST.json"].toString());
@@ -140,7 +140,7 @@ test("§13.6 build refuses missing, extra, duplicated-token and malformed-token 
     if (kind === "missing") fs.unlinkSync(path);
     else if (kind === "extra") fs.writeFileSync(join(folder, "extra.tmpl"), "foreign");
     else fs.appendFileSync(path, kind === "duplicate" ? "@@ROOT_SH@@" : kind === "unknown" ? "@@OTHER@@" : "@@broken");
-    assert.throws(() => build("release", false, folder), subject.TemplateError, kind);
+    assert.throws(() => build("release", false, folder, 1), subject.TemplateError, kind);
   }
 });
 

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { dirname, join, relative, sep, isAbsolute } from "node:path";
 import { atomic, beneath, digest, jsonBytes, readJson, regular, safeRoot } from "./install-fs.ts";
 import { verifyMetadata, authenticateManifest } from "./release.ts";
+import { trustedKeys, versionTrustFailure } from "./install-state.ts";
 import { readShared, validateShared } from "./shared-effects.ts";
 
 export type Entry =
@@ -87,14 +88,20 @@ export function walk(root: string): string[] {
   visit(root);
   return paths;
 }
-export function verifyVersion(folder: string): any {
+export function verifyVersion(folder: string, keys: readonly string[]): any {
   safeRoot(folder);
   for (const name of ["release.json", "release.json.sig", "MANIFEST.json", "node"])
     if (!regular(join(folder, name))) throw new Error(`missing version control: ${name}`);
-  const metadata = verifyMetadata(
-    fs.readFileSync(join(folder, "release.json")),
-    fs.readFileSync(join(folder, "release.json.sig"), "utf8"),
-  );
+  let metadata;
+  try {
+    metadata = verifyMetadata(
+      fs.readFileSync(join(folder, "release.json")),
+      fs.readFileSync(join(folder, "release.json.sig"), "utf8"),
+      keys,
+    );
+  } catch (error) {
+    versionTrustFailure(dirname(folder), error);
+  }
   const manifestBytes = fs.readFileSync(join(folder, "MANIFEST.json"));
   const manifest = authenticateManifest(manifestBytes, metadata, "stored");
   for (const [path, expected] of Object.entries(manifest.files) as Array<[string, { size: number; sha256: string }]>) {
@@ -176,7 +183,7 @@ export function adopt(root: string, version: string, data: Ledger, includePlan =
       data.entries[directory] = { kind: "directory", scope: version };
   }
   if (includePlan && !data.entries[version + "/.planned.json"]) {
-    const manifest = verifyVersion(join(root, version));
+    const manifest = verifyVersion(join(root, version), trustedKeys(root));
     const expected = jsonBytes(buildPlan(root, version, manifest, plan.directories, plan.bootstrap));
     if (fs.readFileSync(path).equals(expected))
       data.entries[version + "/.planned.json"] = { kind: "file", sha256: digest(expected), scope: version };

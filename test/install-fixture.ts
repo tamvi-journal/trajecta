@@ -29,6 +29,7 @@ export function signedFixture(
   version = "0.5.0",
   synthetic = false,
   artifact: "foundation" | "release" = "release",
+  indexSequence = 1,
 ) {
   const root = temporary(),
     release = join(root, "release");
@@ -43,7 +44,7 @@ export function signedFixture(
   else {
     // 4c runtime fixtures exercise the six-template verification artifact. Keys remain
     // ephemeral test-only; foundation still has no bin and has a refusal regression.
-    verificationPayload[artifact] ??= unpack(build(artifact, false), "trajecta-0.5.0");
+    verificationPayload[artifact] ??= unpack(build(artifact, false, undefined, 1), "trajecta-0.5.0");
     payload = { ...verificationPayload[artifact] };
     delete payload["MANIFEST.json"];
     const pkg = JSON.parse(payload["product/package.json"].toString());
@@ -54,6 +55,7 @@ export function signedFixture(
     schema: "trajecta.manifest/v1",
     artifact: synthetic ? "foundation" : artifact,
     version,
+    index_sequence: indexSequence,
     node: ">=22.19 <23 || >=24 <25",
     engines: { identity: "98313ac335a533732630b2ba7039180e4bb89dcf", work: "5c696187eb5df5be7341f88296c5462488a5ae27" },
     files: Object.fromEntries(

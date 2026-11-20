@@ -1,11 +1,19 @@
 /** Reviewable bootstrap embeds only the root/lock kernel; no downloaded code runs before verification. */
 import * as fs from "node:fs";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { stripTypeScriptTypes } from "node:module";
-import { bootstrapEntrySource } from "../product/src/engines.ts";
+import { bootstrapEntrySource, bootstrapLoaderSource } from "../product/src/engines.ts";
 import { ROOT } from "./engine-lock.ts";
 export function bootstrapSource(): string {
-  const kernel = ["install-fs.ts", "install-lock.ts"]
+  const kernel = [
+    "install-fs.ts",
+    "install-lock.ts",
+    "update-json.ts",
+    "release.ts",
+    "update-state.ts",
+    "install-state.ts",
+  ]
     .map((name) =>
       stripTypeScriptTypes(fs.readFileSync(join(ROOT, "product/src", name), "utf8"))
         .replace(/^import[^;]+;/gmu, "")
@@ -16,6 +24,10 @@ export function bootstrapSource(): string {
 }
 export function bootstrapFiles(): Record<string, string> {
   const source = bootstrapSource();
+  const compressed = gzipSync(Buffer.from(source), { level: 9 });
+  compressed[9] = 255;
+  const encodedSource = compressed.toString("base64");
+  const loader = bootstrapLoaderSource(encodedSource);
   const sh = `#!/bin/sh
 # Download, check the published out-of-band SHA-256, then run. Never curl | sh.
 set -eu
@@ -40,14 +52,10 @@ done
 fi
 if [ -z "$chosen" ]; then printf '%s\\n' 'trajecta: need Node 22.19+ or 24 LTS' >&2; exit 1; fi
 # exec occurs before acquiring the root lock; no waiter can outlive a writer owner.
-exec "$chosen" --experimental-strip-types --input-type=module -e "$(cat <<'TRAJECTA_BOOTSTRAP'
-${source}TRAJECTA_BOOTSTRAP
-)" -- "$@"
+exec "$chosen" --experimental-strip-types --input-type=module -e "${loader}" -- "$@"
 `;
   const ps = `# Download and check the out-of-band SHA-256 before running this script.
 $ErrorActionPreference = 'Stop'
-$source = @'
-${source}'@
 $candidates = @($env:PATH.Split(';') | Where-Object { $_ } | ForEach-Object { Join-Path $_ 'node.exe' })
 $candidates += @("$env:ProgramFiles\\nodejs\\node.exe", "$env:USERPROFILE\\.volta\\bin\\node.exe", "$env:USERPROFILE\\.fnm\\current\\bin\\node.exe")
 $chosen = $null
@@ -58,9 +66,8 @@ foreach ($candidate in $candidates) {
 }
 if (-not $chosen) { [Console]::Error.WriteLine('trajecta: need Node 22.19+ or 24 LTS'); exit 1 }
 # PowerShell only probes, starts the selected Node and waits. It writes no files.
-$encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($source))
 # The native argv carries only ASCII base64; PS 5.1 cannot strip quotes from code bytes.
-& $chosen --experimental-strip-types --input-type=module -e "await import('data:text/javascript;base64,$encoded#trajecta-bootstrap')" -- @args
+& $chosen --experimental-strip-types --input-type=module -e "${loader}" -- @args
 exit $LASTEXITCODE
 `;
   return { "install.sh": sh, "install.ps1": ps };

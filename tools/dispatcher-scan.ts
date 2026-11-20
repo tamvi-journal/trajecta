@@ -104,7 +104,7 @@ export function scanDispatcher(cli: string, adapter: string): void {
   if (
     bootstrap &&
     createHash("sha256").update(bootstrap).digest("hex") !==
-      "08c9c13c2d5a337d24a74d500647c04c37f693e83d06f750045ff69f004d890c"
+      "3f372eda2351340c0ab4efc5bce6c2b11f459e782f8cd475a847a50ada14fc53"
   )
     fail();
   const outsidePass = compact(

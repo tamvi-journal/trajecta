@@ -47,7 +47,7 @@ test("real install, idempotent retry, read-only doctor and full uninstall keep s
   assert.deepEqual(tree(join(f.root, "identity")), data);
   r = run(f, "uninstall");
   assert.equal(r.status, 0, r.stderr);
-  assert(!fs.existsSync(root));
+  assert.deepEqual(Object.keys(tree(root)), ["update-state.json"]);
   assert.deepEqual(tree(join(f.root, "identity")), data);
   assert.deepEqual(tree(join(f.root, "profiles")), profiles);
   assert(!fs.existsSync(join(f.root, "work")));
@@ -123,7 +123,7 @@ test("full uninstall terminal kills converge through fallback without the printe
     assert.notEqual(r.status, 0, point);
     r = run(f, "install", ["--resume-uninstall"]);
     assert.equal(r.status, 0, point + ": " + r.stderr);
-    assert(!fs.existsSync(join(f.root, "install")), point);
+    assert.deepEqual(Object.keys(tree(join(f.root, "install"))), ["update-state.json"], point);
     assert.deepEqual(tree(join(f.root, "identity")), data);
   }
 });

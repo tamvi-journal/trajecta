@@ -22,7 +22,7 @@ export function verifyRelease(directory: string): { metadata: any; archive: stri
   const path = join(directory, "release.json");
   for (const file of [path, path + ".sig"]) if (!regular(file)) throw new Error("missing release metadata");
   const bytes = fs.readFileSync(path);
-  const metadata = verifyMetadata(bytes, fs.readFileSync(path + ".sig", "utf8"));
+  const metadata = verifyMetadata(bytes, fs.readFileSync(path + ".sig", "utf8"), [TRUST_ANCHOR]);
   checkpoint("A:signature");
   const archive = join(directory, `trajecta-${metadata.version}.tar.gz`),
     extractor = join(directory, "trajecta-extract.mjs");
@@ -34,11 +34,15 @@ export function verifyRelease(directory: string): { metadata: any; archive: stri
   checkpoint("A:extractor-digest");
   return { metadata, archive, extractor };
 }
-export function verifyMetadata(bytes: Buffer, signatureText: string): any {
+export function verifyMetadata(bytes: Buffer, signatureText: string, keys: readonly string[]): any {
   requireAnchor();
   const signature = base64(signatureText, 64);
-  const key = createPublicKey({ key: base64(TRUST_ANCHOR), format: "der", type: "spki" });
-  if (key.asymmetricKeyType !== "ed25519" || !verify(null, bytes, key, signature))
+  if (
+    !keys.some((anchor) => {
+      const key = createPublicKey({ key: base64(anchor), format: "der", type: "spki" });
+      return key.asymmetricKeyType === "ed25519" && verify(null, bytes, key, signature);
+    })
+  )
     throw new Error("release signature mismatch");
   const metadata = JSON.parse(bytes.toString("utf8"));
   if (
@@ -65,5 +69,10 @@ export function verifyArtifact(manifest: any, metadata?: any): void {
     (manifest.version !== metadata.version || JSON.stringify(manifest.engines) !== JSON.stringify(metadata.engines))
   )
     throw new Error("release/MANIFEST engine mismatch");
+  if (
+    manifest.artifact !== "foundation" &&
+    (!Number.isSafeInteger(manifest.index_sequence) || manifest.index_sequence < 1)
+  )
+    throw new Error("release has no index_sequence");
   if (manifest.node !== ">=22.19 <23 || >=24 <25") throw new Error("unsupported release Node range");
 }

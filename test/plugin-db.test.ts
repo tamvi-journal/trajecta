@@ -97,7 +97,7 @@ test("install custom DB and later standalone second DB stay bound through real a
   assert.deepEqual(tree(root), before);
   const removed = run(["uninstall", "--root", root, "--db", custom]);
   assert.equal(removed.status, 0, removed.stderr);
-  assert(!fs.existsSync(root));
+  assert.deepEqual(Object.keys(tree(root)), ["update-state.json"]);
   assert(fs.existsSync(custom));
   assert(fs.existsSync(second));
 });

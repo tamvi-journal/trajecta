@@ -68,7 +68,7 @@ test("two foundation builds exact and self excluded; release completeness still 
     if (change === "digest") damaged["product/src/cli.ts"] = Buffer.from("changed");
     assert.throws(() => verifyManifest(damaged), /mismatch/);
   }
-  assert.throws(() => build("release", false, join(temporary(), "missing-templates")), /complete bin/);
+  assert.throws(() => build("release", false, join(temporary(), "missing-templates"), 1), /complete bin/);
   process.stdout.write("M2 foundation tarball " + sha(a) + "\n");
 });
 test("lint and independent scan reject engine/sqlite bypasses including dynamic imports", () => {

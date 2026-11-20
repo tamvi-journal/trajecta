@@ -1,6 +1,10 @@
 /** Test-only --import seam. All key material remains in process memory/environment. */
 import * as fs from "node:fs";
 import { registerHooks } from "node:module";
+if (process.env.TEST_CONFIRM_RESET) {
+  Object.defineProperty(process.stdin, "isTTY", { value: true });
+  Object.defineProperty(process.stdout, "isTTY", { value: true });
+}
 registerHooks({
   load(url, context, nextLoad) {
     if (url.endsWith("#trajecta-bootstrap")) {
@@ -10,6 +14,25 @@ registerHooks({
         source: String(result.source)
           .replace('const TRUST_ANCHOR = "";', `const TRUST_ANCHOR = ${JSON.stringify(process.env.TEST_TRUST_ANCHOR)};`)
           .replace("const ALLOW_FOUNDATION = false;", "const ALLOW_FOUNDATION = true;"),
+      };
+    }
+    if (url.endsWith("/product/src/installer.ts") && process.env.TEST_CONFIRM_RESET) {
+      const result = nextLoad(url, context);
+      return {
+        ...result,
+        source: String(result.source).replace(
+          /export async function confirmation\([^]*?\n\}/u,
+          'export async function confirmation(prompt: string, expected: string): Promise<boolean> { return expected === "RESET UPDATE STATE" && process.env.TEST_CONFIRM_RESET === "yes"; }',
+        ),
+      };
+    }
+    if (url.endsWith("/product/src/update-source.ts") && process.env.TEST_UPDATE_BASE) {
+      return {
+        format: "module",
+        shortCircuit: true,
+        source: `export const UPDATE_BASE=${JSON.stringify(process.env.TEST_UPDATE_BASE)};
+         export const REDIRECT_HOSTS=["127.0.0.1"];
+         export const FETCH_TIMEOUT_MS=${Number(process.env.TEST_FETCH_TIMEOUT || 60000)};`,
       };
     }
     if (url.endsWith("/product/src/node-probe.ts") && process.env.TEST_NODE_CANDIDATES) {
