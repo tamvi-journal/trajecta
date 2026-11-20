@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { testKey } from "./install-fixture.ts";
+import { digest } from "../product/src/install-fs.ts";
 import { canonical, parseCanonical } from "../product/src/update-json.ts";
 import { decideIndex, resetIndex, encodeState, decodeState } from "../product/src/update-state.ts";
 const a = testKey(),
@@ -90,4 +91,10 @@ test("BOM and invalid UTF-8 are noncanonical; authorized return rotations obey t
   ];
   const i = index(10, rotations);
   assert.equal(decideIndex(i.bytes, i.signature, initial(), a.anchor).keys.at(-1), a.anchor);
+});
+
+test("a byte-known index still expires before known-digest recognition", () => {
+  const expired = index(10, [], a, "2000-01-01T00:00:00Z");
+  const known = { ...initial(), floor: 10, accepted: { sequence: 10, index_sha256: digest(expired.bytes) } };
+  assert.throws(() => decideIndex(expired.bytes, "unused", known, a.anchor), /expired/);
 });

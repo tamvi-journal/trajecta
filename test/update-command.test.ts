@@ -190,9 +190,11 @@ test("forged reset markers are reported and never authorize deletion", () => {
   const root = join(f.root, "install"),
     before = fs.readFileSync(join(root, "update-state.json"));
   fs.writeFileSync(join(root, "update-state.reset"), "");
-  r = install(f);
+  const older = signedFixture(key, "0.5.0", false, "release", 5);
+  r = install(f, {}, older.release);
   assert.equal(r.status, 0, r.stderr);
   assert(fs.readFileSync(join(root, "update-state.json")).equals(before));
+  assert.match(r.stdout, /Retained unexpected path: .*update-state.reset/);
   assert(fs.existsSync(join(root, "update-state.reset")));
 });
 
@@ -243,6 +245,13 @@ test("normal index acceptance persists paired sequence/digest; known rotation-be
     });
     assert.notEqual(r.status, 0);
     const persisted = state(f);
+    if (point.endsWith("before-rename")) {
+      assert(fs.existsSync(join(root, "update-state.json.tmp")));
+      const orphanTree = tree(root);
+      const check = run(f, "update", ["--check", "--from", i.directory]);
+      assert.equal(check.status, 0, check.stderr);
+      assert.deepEqual(tree(root), orphanTree);
+    }
     if (point.endsWith("before-rename")) assert.equal(persisted.accepted, null);
     else {
       assert.equal(persisted.accepted!.sequence, 20);
@@ -296,4 +305,21 @@ test("unsequenced release refuses before seeding; malformed state survives a typ
   assert.deepEqual(Object.keys(tree(join(other.root, "install"))), ["update-state.json"]);
   assert(fs.readFileSync(path).equals(bad));
   assert.match(removed.stdout, /Retained invalid update-state/);
+});
+
+test("only a live reset can lower a previously seen but uninstalled sequence", () => {
+  const f = fixture();
+  assert.equal(install(f).status, 0);
+  const i = publish(f, 30);
+  let r = run(f, "update", ["--reset-state", "--from", i.directory], { TEST_CONFIRM_RESET: "yes" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(state(f).floor, 30);
+  publish(f, 20);
+  r = run(f, "update", ["--check", "--from", i.directory]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /replay/);
+  r = run(f, "update", ["--reset-state", "--from", i.directory], { TEST_CONFIRM_RESET: "yes" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(state(f).floor, 20);
+  assert.match(r.stdout, /previously seen but never installed/);
 });

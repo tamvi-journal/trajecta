@@ -120,7 +120,7 @@ test("each retirement kill resumes absent-file unlinks and atomically drops four
   assert.equal(f.count(1), 4);
   r = f.run("uninstall", ["--resume"]);
   assert.equal(r.status, 0, r.stderr);
-  assert(!fs.existsSync(f.root));
+  assert.deepEqual(Object.keys(tree(f.root)), ["update-state.json"]);
 });
 test("a foreign replacement after a creation kill is retained byte-for-byte through retry and full uninstall", () => {
   const f = fixture();
