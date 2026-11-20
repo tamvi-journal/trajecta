@@ -7,6 +7,7 @@ import { createPublicKey, verify } from "node:crypto";
 import { canonical, parseCanonical, fields, positiveSequence } from "./update-json.ts";
 import { atomic, digest, regular, syncDir } from "./install-fs.ts";
 import { base64 } from "./release.ts";
+import { compareSemVer, isSemVer } from "./semver.ts";
 
 export type Rotation = {
   schema: "trajecta.rotation/v1";
@@ -143,13 +144,12 @@ export function parseIndex(bytes: Buffer): Index {
     !Array.isArray(index.rotations)
   )
     throw new Error("invalid update index");
-  let previous = "";
+  let previous: string | undefined;
   for (const row of index.releases) {
     fields(row, ["version", "release_sha256"]);
     if (
-      typeof row.version !== "string" ||
-      !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/u.test(row.version) ||
-      row.version <= previous ||
+      !isSemVer(row.version) ||
+      (previous !== undefined && compareSemVer(row.version, previous) <= 0) ||
       !/^[a-f0-9]{64}$/u.test(row.release_sha256)
     )
       throw new Error("invalid index release");

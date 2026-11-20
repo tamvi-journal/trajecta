@@ -78,6 +78,20 @@ test("local HTTPS: valid check is pure; redirect, scheme, caps, timeout and trun
       res.end();
       return;
     }
+    const url = new URL(req.url!, "https://127.0.0.1");
+    if (mode.startsWith("redirect-")) {
+      const hop = Number(url.searchParams.get("hop") ?? "0");
+      if (hop < Number(mode.slice("redirect-".length))) {
+        res.writeHead(302, { location: url.pathname + "?hop=" + (hop + 1) });
+        res.end();
+        return;
+      }
+    }
+    if (mode === "redirect-loop") {
+      res.writeHead(302, { location: req.url });
+      res.end();
+      return;
+    }
     if (mode === "large-header") {
       res.writeHead(200, { "content-length": 1024 * 1024 + 1 });
       res.end();
@@ -95,7 +109,7 @@ test("local HTTPS: valid check is pure; redirect, scheme, caps, timeout and trun
       setImmediate(() => res.destroy());
       return;
     }
-    const body = req.url!.endsWith(".sig") ? Buffer.from(signature) : bytes;
+    const body = url.pathname.endsWith(".sig") ? Buffer.from(signature) : bytes;
     if (mode === "gzip") {
       const zipped = gzipSync(body);
       res.writeHead(200, { "content-encoding": "gzip", "content-length": zipped.length });
@@ -104,9 +118,9 @@ test("local HTTPS: valid check is pure; redirect, scheme, caps, timeout and trun
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = "https://127.0.0.1:" + (server.address() as any).port;
-  async function invoke(url = base) {
+  async function invoke(url = base, timeout = "700") {
     const child = spawn(process.execPath, ["--experimental-strip-types", CLI, "update", "--check", "--root", root], {
-      env: { ...f.env, TEST_UPDATE_BASE: url, TEST_FETCH_TIMEOUT: "700", NODE_EXTRA_CA_CERTS: cert },
+      env: { ...f.env, TEST_UPDATE_BASE: url, TEST_FETCH_TIMEOUT: timeout, NODE_EXTRA_CA_CERTS: cert },
     });
     let stdout = "",
       stderr = "";
@@ -127,6 +141,20 @@ test("local HTTPS: valid check is pure; redirect, scheme, caps, timeout and trun
     const compressed = await invoke();
     assert.equal(compressed.status, 0, compressed.stderr);
     assert.deepEqual(tree(root), before);
+    mode = "redirect-5";
+    const fiveStart = requests,
+      five = await invoke(base, "5000");
+    assert.equal(five.status, 0, five.stderr);
+    assert.equal(requests - fiveStart, 12, "index and signature each follow exactly five redirects");
+    assert.deepEqual(tree(root), before);
+    for (mode of ["redirect-6", "redirect-loop"]) {
+      const start = requests,
+        refused = await invoke(base, "5000");
+      assert.equal(refused.status, 1, mode);
+      assert.equal(refused.stderr, "trajecta: update redirect limit exceeded\n", mode);
+      assert.equal(requests - start, 6, "the sixth redirect is refused before another request");
+      assert.deepEqual(tree(root), before, mode);
+    }
     for (mode of ["host", "http", "large-header", "large-stream", "timeout", "truncated"]) {
       const result = await invoke();
       assert.equal(result.status, 1, mode + ": " + result.stderr);

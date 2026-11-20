@@ -37,6 +37,7 @@ export async function fetchUpdateFile(path: string, cap: number, from?: string):
     const response = await fetch(url, { redirect: "manual", signal });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       await response.body?.cancel();
+      if (hops >= 5) throw new Error("update redirect limit exceeded");
       const next = response.headers.get("location");
       if (!next) throw new Error("update redirect missing location");
       url = new URL(next, url);

@@ -11,6 +11,7 @@ export function bootstrapSource(): string {
     "install-lock.ts",
     "update-json.ts",
     "release.ts",
+    "semver.ts",
     "update-state.ts",
     "install-state.ts",
   ]

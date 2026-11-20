@@ -3,7 +3,8 @@ import test from "node:test";
 import { testKey } from "./install-fixture.ts";
 import { digest } from "../product/src/install-fs.ts";
 import { canonical, parseCanonical } from "../product/src/update-json.ts";
-import { decideIndex, resetIndex, encodeState, decodeState } from "../product/src/update-state.ts";
+import { decideIndex, resetIndex, encodeState, decodeState, parseIndex } from "../product/src/update-state.ts";
+import { compareSemVer, isSemVer } from "../product/src/semver.ts";
 const a = testKey(),
   b = testKey();
 const row = { version: "0.5.0", release_sha256: "a".repeat(64) };
@@ -14,6 +15,100 @@ function index(sequence: number, rotations: any[] = [], key = a, expires = "2099
   return { bytes, signature: key.sign(bytes) };
 }
 const initial = () => ({ schema: "trajecta.update-state/v2" as const, floor: 1, accepted: null, rotations: [] });
+function versionIndex(versions: string[]): Buffer {
+  return Buffer.from(
+    canonical({
+      schema: "trajecta.index/v1",
+      sequence: 1,
+      expires: "2099-01-01T00:00:00Z",
+      latest: versions.at(-1),
+      releases: versions.map((version) => ({ ...row, version })),
+      rotations: [],
+    }),
+  );
+}
+for (const versions of [
+  ["0.9.0", "0.10.0"],
+  ["1.0.0-rc.1", "1.0.0"],
+  ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0"],
+]) {
+  test("index accepts increasing SemVer precedence: " + versions.join(" < "), () => {
+    assert.deepEqual(
+      parseIndex(versionIndex(versions)).releases.map((r) => r.version),
+      versions,
+    );
+  });
+}
+test("index refuses reversed or duplicate release precedence", () => {
+  for (const versions of [
+    ["0.10.0", "0.9.0"],
+    ["1.0.0", "1.0.0-rc.1"],
+    ["1.0.0-beta.11", "1.0.0-beta.2"],
+    ["1.0.0", "1.0.0"],
+    ["1.0.0-alpha.1", "1.0.0-alpha.1"],
+  ])
+    assert.throws(() => parseIndex(versionIndex(versions)), /invalid index release/, versions.join(", "));
+});
+test("index version grammar is exact SemVer without build metadata", () => {
+  for (const version of [
+    "1.0.0-01",
+    "1.0.0-alpha.01",
+    "01.0.0",
+    "1.00.0",
+    "1.0.00",
+    "1.0.0-",
+    "1.0.0-alpha..1",
+    "1.0.0+build",
+    "1.0.0-rc.1+build",
+    "v1.0.0",
+    "1.0",
+    "1.0.0\n",
+    "1.0.0-α",
+  ])
+    assert.throws(() => parseIndex(versionIndex([version])), /invalid index release/, JSON.stringify(version));
+  for (const version of ["0.0.0", "1.0.0-0", "1.0.0-01a", "1.0.0-x-y-z.--"])
+    assert.equal(parseIndex(versionIndex([version])).releases[0].version, version);
+});
+test("shared SemVer comparator implements numeric, ASCII and prerelease-prefix precedence", () => {
+  const versions = [
+    "0.9.0",
+    "0.10.0",
+    "1.0.0-0",
+    "1.0.0-1",
+    "1.0.0-A",
+    "1.0.0-alpha",
+    "1.0.0-alpha.1",
+    "1.0.0-alpha.beta",
+    "1.0.0-beta",
+    "1.0.0-beta.2",
+    "1.0.0-beta.11",
+    "1.0.0-rc.1",
+    "1.0.0",
+    "2.0.0",
+    "2.1.0",
+    "2.1.1",
+  ];
+  for (let i = 0; i < versions.length; i++)
+    for (let j = 0; j < versions.length; j++)
+      assert.equal(compareSemVer(versions[i], versions[j]), Math.sign(i - j), versions[i] + " vs " + versions[j]);
+});
+test("SemVer numeric identifiers retain precision beyond JavaScript's safe integer range", () => {
+  for (const [left, right] of [
+    ["9007199254740992.0.0", "9007199254740993.0.0"],
+    ["1.9007199254740992.0", "1.9007199254740993.0"],
+    ["1.0.9007199254740992", "1.0.9007199254740993"],
+    ["1.0.0-9007199254740992", "1.0.0-9007199254740993"],
+  ]) {
+    assert.equal(compareSemVer(left, right), -1);
+    assert.equal(compareSemVer(right, left), 1);
+    assert.doesNotThrow(() => parseIndex(versionIndex([left, right])));
+  }
+  for (const invalid of ["1.0.0-01", "1.0.0+build", "1.0.0\n"]) {
+    assert.equal(isSemVer(invalid), false);
+    assert.throws(() => compareSemVer(invalid, "1.0.0"), /invalid semantic version/);
+    assert.throws(() => compareSemVer("1.0.0", invalid), /invalid semantic version/);
+  }
+});
 test("canonical boundary refuses duplicate fields, noncanonical bytes and unsafe integers", () => {
   assert.equal(canonical({ b: 1, a: "x" }), '{"a":"x","b":1}');
   for (const s of ['{"a":1,"a":1}', '{ "a":1}', '{"a":1.0}', '{"a":9007199254740993}'])
