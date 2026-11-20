@@ -128,6 +128,10 @@ process.exitCode=1});
 }
 
 /** Pure, pinned bootstrap source; downloaded imports occur only in the verified adapters. */
+/** Decode the reviewed bootstrap in memory, keeping Windows argv below its native limit. */
+export function bootstrapLoaderSource(encoded: string): string {
+  return `await import('data:text/javascript;base64,'+(await import('node:zlib')).gunzipSync(Buffer.from('${encoded}','base64')).toString('base64')+'#trajecta-bootstrap')`;
+}
 export function bootstrapEntrySource(kernel: string): string {
   return `import * as fs from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep, join } from 'node:path';
@@ -156,30 +160,43 @@ async function runStagedResume(staging, version, argv, token) {
 async function main() {
   if (!TRUST_ANCHOR) throw Error('no trusted release key configured');
   const argv=process.argv.slice(1), values={};
-  let resume=false,noUserBin=false;
+  let resume=false,noUserBin=false,yes=false;
   for(let i=0;i<argv.length;) {
     if(argv[i]==='--resume-uninstall') {resume=true;i++;continue;}
+    if(argv[i]==='--yes') {yes=true;i++;continue;}
     if(argv[i]==='--no-user-bin') {noUserBin=true;i++;continue;}
     if(!['--root','--release','--db','--profile','--work-root','--user-bin'].includes(argv[i]) || argv[i+1]===undefined)
       throw Error('invalid bootstrap option: '+argv[i]);
     values[argv[i]]=argv[i+1];i+=2;
   }
   const root=resolve(values['--root'] || (process.platform==='win32' ? join(process.env.LOCALAPPDATA,'Trajecta') : join(process.env.HOME,'.trajecta')));
-  const releaseDir=resolve(values['--release'] || process.cwd()), existed=fs.existsSync(root), held=acquire(root);
+  const releaseDir=resolve(values['--release'] || process.cwd()), existed=fs.existsSync(root);
+  const terminal=postUninstall(root);
+  if(!resume && !terminal && regular(join(root,'current')) && fs.readFileSync(join(root,'current'),'utf8')==='uninstalling\\n')
+    throw Error('trajecta is being uninstalled; run trajecta uninstall --resume');
+  const held=acquire(root);
   let staging;
   try {
     cleanupTemps(root,held);
-    if(!resume && regular(join(root,'current')) && fs.readFileSync(join(root,'current'),'utf8')==='uninstalling\\n')
+    if(!resume && !terminal && regular(join(root,'current')) && fs.readFileSync(join(root,'current'),'utf8')==='uninstalling\\n')
       throw Error('trajecta is being uninstalled; run trajecta uninstall --resume');
+    if(!resume) {
+      if(terminal) await completeUninstall(root, async (prompt, expected) => {
+        if(yes) return false;
+        if(!process.stdin.isTTY || !process.stdout.isTTY) return false;
+        const {createInterface}=await import('node:readline/promises');
+        const input=createInterface({input:process.stdin,output:process.stdout});
+        try {return await input.question(prompt)===expected;} finally {input.close();}
+      });
+      requireInstallState(root);
+      clearStateTemp(root);
+    }
     for(const name of fs.readdirSync(root)) if(/^\\.staging-[0-9]/u.test(name)){const abandoned=join(root,name);safeRoot(abandoned);fs.rmSync(abandoned,{recursive:true})}
     const raw=fs.readFileSync(join(releaseDir,'release.json'));
-    const text=fs.readFileSync(join(releaseDir,'release.json.sig'),'utf8').replace(/\\n$/u,'');
-    const signature=Buffer.from(text,'base64');
-    if(signature.length!==64 || signature.toString('base64')!==text) throw Error('invalid signature');
-    const key=createPublicKey({key:Buffer.from(TRUST_ANCHOR,'base64'),format:'der',type:'spki'});
-    if(key.asymmetricKeyType!=='ed25519' || !verify(null,raw,key,signature)) throw Error('release signature mismatch');
-    const metadata=JSON.parse(raw.toString());
-    if(!/^\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.-]+)?$/u.test(metadata.version)) throw Error('invalid release version');
+    const text=fs.readFileSync(join(releaseDir,'release.json.sig'),'utf8');
+    let metadata;
+    try {metadata=verifyMetadata(raw,text,resume ? trustedKeys(root) : [TRUST_ANCHOR]);}
+    catch(error) {if(resume) versionTrustFailure(root,error);throw error;}
     const archive=fs.readFileSync(join(releaseDir,'trajecta-'+metadata.version+'.tar.gz'));
     if(archive.length!==metadata.size || digest(archive)!==metadata.sha256) throw Error('release size/SHA-256 mismatch');
     const extractor=fs.readFileSync(join(releaseDir,'trajecta-extract.mjs'));
@@ -188,6 +205,7 @@ async function main() {
     if(digest(verified.inspected.manifestBytes)!==metadata.manifest_sha256) throw Error('extracted MANIFEST digest mismatch');
     if(verified.inspected.manifest.artifact==='foundation' && !ALLOW_FOUNDATION) throw Error('foundation is not a release');
     if(verified.inspected.manifest.node!=='>=22.19 <23 || >=24 <25' || JSON.stringify(verified.inspected.manifest.engines)!==JSON.stringify(metadata.engines)) throw Error('release/MANIFEST compatibility mismatch');
+    if(!resume) seedInstallState(root,verified.inspected.manifest.index_sequence);
     staging=join(root,'.staging-'+metadata.version+'-'+randomBytes(16).toString('hex'));
     // Extract only after the complete metadata pass and signed MANIFEST check.
     const checked=await runVerifiedExtractor(extractor,archive,metadata.version,staging);

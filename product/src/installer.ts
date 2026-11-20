@@ -12,6 +12,15 @@ import { identityInstall, workDoctor, runVerifiedExtractor, runStagedInstall } f
 import { checkpoint } from "./checkpoint.ts";
 import { inspect } from "../trajecta-extract.mjs";
 import { cleanupRecovery } from "./recovery.ts";
+import { TRUST_ANCHOR } from "./trust.ts";
+import {
+  trustedKeys,
+  postUninstall,
+  completeUninstall,
+  requireInstallState,
+  seedInstallState,
+} from "./install-state.ts";
+import { clearStateTemp } from "./update-state.ts";
 import { stageShared, readShared, publishShared } from "./shared-effects.ts";
 
 export type Options = {
@@ -23,6 +32,7 @@ export type Options = {
   staged?: string;
   token?: string;
   rollback?: boolean;
+  yes?: boolean;
   break?: boolean;
   resumeUninstall?: boolean;
   explicitProfile?: boolean;
@@ -60,6 +70,10 @@ export function options(argv: string[]): Options {
   };
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
+    if (key === "--yes") {
+      result.yes = true;
+      continue;
+    }
     if (key === "--no-user-bin") {
       result.noUserBin = true;
       continue;
@@ -118,7 +132,7 @@ export function assertInstalledState(root: string): void {
     );
 }
 export async function doctor(folder: string, opts: Options, allowMissing = false): Promise<void> {
-  verifyVersion(folder);
+  verifyVersion(folder, trustedKeys(opts.root));
   if (!supported(process.versions.node)) throw new Error("need Node 22.19+ or 24 LTS");
   if (regular(opts.db)) {
     const result = await identityInstall(folder, ["--profile", opts.profile, "--db", opts.db, "doctor"], process.env);
@@ -149,7 +163,7 @@ async function committed(opts: Options, node: string, metadata: any, staged: str
       digest(fs.readFileSync(join(folder, "MANIFEST.json"))) !== metadata.manifest_sha256
     )
       throw new Error("installed version MANIFEST differs");
-    verifyVersion(folder);
+    verifyVersion(folder, [TRUST_ANCHOR]);
   } else {
     fs.renameSync(source, folder);
     syncDir(opts.root);
@@ -159,7 +173,7 @@ async function committed(opts: Options, node: string, metadata: any, staged: str
   const intent = previous?.bootstrap ?? { db: opts.db, absent: !fs.existsSync(opts.db) };
   if (intent.db !== opts.db || typeof intent.absent !== "boolean") throw new Error("bootstrap plan differs; retained");
   const data = ledger(opts.root);
-  const manifest = verifyVersion(folder),
+  const manifest = verifyVersion(folder, [TRUST_ANCHOR]),
     plan = buildPlan(opts.root, metadata.version, manifest, createdDirectories, intent),
     bytes = jsonBytes(plan),
     planPath = join(folder, ".planned.json");
@@ -241,7 +255,7 @@ export async function install(argv: string[]): Promise<number> {
   }
   if (opts.resumeUninstall) return (await import("./uninstall.ts")).fallback(opts);
   if (opts.staged) throw new Error("staged installation requires the internal verified entry");
-  assertInstalledState(opts.root);
+  if (!postUninstall(opts.root)) assertInstalledState(opts.root);
   const node = probeNode();
   const handoff = handoffNode(node);
   if (handoff !== null) return handoff;
@@ -250,9 +264,21 @@ export async function install(argv: string[]): Promise<number> {
   let staged: string | undefined;
   try {
     cleanupTemps(opts.root, held);
-    assertInstalledState(opts.root);
+    const terminal = postUninstall(opts.root);
+    if (!terminal) assertInstalledState(opts.root);
+    if (
+      !terminal &&
+      (fs.readdirSync(opts.root).includes("update-state.json") || !fs.existsSync(join(opts.root, ".uninstall")))
+    )
+      requireInstallState(opts.root);
+    if (!terminal) clearStateTemp(opts.root);
     const retained = cleanupRecovery(opts.root);
     if (retained.length) throw new Error("uninstall retained paths: " + retained.join(", "));
+    await completeUninstall(opts.root, opts.yes ? async () => false : confirmation);
+    requireInstallState(opts.root);
+    if (fs.existsSync(join(opts.root, "update-state.reset")))
+      process.stdout.write("Retained unexpected path: " + join(opts.root, "update-state.reset") + "\n");
+    clearStateTemp(opts.root);
     for (const name of fs.readdirSync(opts.root))
       if (/^\.staging-[0-9]/u.test(name)) {
         const abandoned = join(opts.root, name);
@@ -262,7 +288,8 @@ export async function install(argv: string[]): Promise<number> {
     checkpoint("A:cleanup");
     const { metadata, archive, extractor } = verifyRelease(opts.releaseDir);
     const checked = inspect(fs.readFileSync(archive), metadata.version);
-    authenticateManifest(checked.manifestBytes, metadata, "extracted");
+    const manifest = authenticateManifest(checked.manifestBytes, metadata, "extracted");
+    seedInstallState(opts.root, manifest.index_sequence);
     checkpoint("A:inspection");
     staged = join(opts.root, `.staging-${metadata.version}-${randomBytes(16).toString("hex")}`);
     const extractorBytes = fs.readFileSync(extractor);

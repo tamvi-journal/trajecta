@@ -84,7 +84,7 @@ test("real process kills at every generation creation boundary preserve 0-or-4 a
           assert.equal(f.count(1), 0, point);
         } else {
           assert.equal(uninstalled.status, 0, point + ": " + uninstalled.stderr);
-          assert(!fs.existsSync(f.root), point);
+          assert.deepEqual(Object.keys(tree(f.root)), ["update-state.json"], point);
         }
       }
     }
@@ -111,7 +111,7 @@ test("each retirement kill resumes absent-file unlinks and atomically drops four
       assert.equal(f.count(1), 0, point);
       const removed = f.run("uninstall");
       assert.equal(removed.status, 0, point + ": " + removed.stderr);
-      assert(!fs.existsSync(f.root), point);
+      assert.deepEqual(Object.keys(tree(f.root)), ["update-state.json"], point);
     }
   const f = fixture();
   assert.equal(f.build().status, 0);
@@ -120,7 +120,7 @@ test("each retirement kill resumes absent-file unlinks and atomically drops four
   assert.equal(f.count(1), 4);
   r = f.run("uninstall", ["--resume"]);
   assert.equal(r.status, 0, r.stderr);
-  assert(!fs.existsSync(f.root));
+  assert.deepEqual(Object.keys(tree(f.root)), ["update-state.json"]);
 });
 test("a foreign replacement after a creation kill is retained byte-for-byte through retry and full uninstall", () => {
   const f = fixture();
@@ -149,7 +149,7 @@ test("full-uninstall parent-directory kills converge and a moved ancestor is ret
     assert.notEqual(r.status, 0, point);
     r = f.run("uninstall", ["--resume"]);
     assert.equal(r.status, 0, point + ": " + r.stderr);
-    assert(!fs.existsSync(f.root), point);
+    assert.deepEqual(Object.keys(tree(f.root)), ["update-state.json"], point);
   }
   const f = fixture();
   assert.equal(f.build().status, 0);

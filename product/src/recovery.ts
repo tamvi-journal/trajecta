@@ -3,17 +3,24 @@ import { dirname, join, relative, sep } from "node:path";
 import { atomic, beneath, digest, jsonBytes, regular, safeRoot, syncDir } from "./install-fs.ts";
 import { authenticateManifest, verifyMetadata } from "./release.ts";
 import { walk, type Ledger } from "./owned.ts";
+import { trustedKeys, versionTrustFailure } from "./install-state.ts";
 import { checkpoint } from "./checkpoint.ts";
 
 const DATA = ["node", "DIGESTS.json", "MANIFEST.json", "release.json.sig", "release.json"];
-export function signedManifest(folder: string): any {
+export function signedManifest(folder: string, keys: readonly string[]): any {
   safeRoot(folder);
   for (const name of ["release.json", "release.json.sig", "MANIFEST.json"])
     if (!regular(join(folder, name))) throw new Error(`missing signed recovery control: ${name}`);
-  const metadata = verifyMetadata(
-    fs.readFileSync(join(folder, "release.json")),
-    fs.readFileSync(join(folder, "release.json.sig"), "utf8"),
-  );
+  let metadata;
+  try {
+    metadata = verifyMetadata(
+      fs.readFileSync(join(folder, "release.json")),
+      fs.readFileSync(join(folder, "release.json.sig"), "utf8"),
+      keys,
+    );
+  } catch (error) {
+    versionTrustFailure(dirname(folder), error);
+  }
   return authenticateManifest(fs.readFileSync(join(folder, "MANIFEST.json")), metadata, "stored");
 }
 function matches(folder: string, name: string, expected: { size: number; sha256: string }): void {
@@ -58,7 +65,7 @@ function copyVerified(path: string, bytes: Buffer): void {
 export function createRecovery(root: string, version: string, ledger: Ledger): { list: any; anchor: string } {
   const source = join(root, version),
     destination = join(root, ".uninstall"),
-    manifest = signedManifest(source);
+    manifest = signedManifest(source, trustedKeys(root));
   const files: Record<string, string> = {};
   for (const name of productPaths(manifest)) {
     matches(source, name, manifest.files[name]);
@@ -117,7 +124,7 @@ export function cleanupRecovery(root: string): string[] {
     });
   let manifest: any;
   if (products.length) {
-    manifest = signedManifest(folder);
+    manifest = signedManifest(folder, trustedKeys(root));
     for (const path of products) {
       const name = relative(folder, path).split(sep).join("/");
       if (!manifest.files[name] || !name.startsWith("product/")) throw new Error(`unknown recovery product: ${name}`);
@@ -127,7 +134,7 @@ export function cleanupRecovery(root: string): string[] {
     // A last-product-unlink crash leaves the authenticated metadata available for C's empty dirs.
     // If those inert controls are already gone/invalid, no code can execute; keep unproved dirs.
     try {
-      manifest = signedManifest(folder);
+      manifest = signedManifest(folder, trustedKeys(root));
     } catch {
       manifest = undefined;
     }

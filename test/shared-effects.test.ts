@@ -66,7 +66,7 @@ test("M3: install stages exact launchers/plugin, ledgers shared bytes, retries a
   assert.equal(r.status, 0, r.stderr);
   r = run(f, "uninstall");
   assert.equal(r.status, 0, r.stderr);
-  assert(!fs.existsSync(root));
+  assert.deepEqual(Object.keys(tree(root)), ["update-state.json"]);
   assert.deepEqual(tree(join(f.root, "identity")), stores);
 });
 test("M3: no explicit profile means no plugin and a hint; a modified launcher is retained", () => {
@@ -109,7 +109,7 @@ test("M3: launcher boundaries converge from staged bytes; plugin boundaries use 
     assert.equal(r.status, 0, point + ": " + r.stderr);
     const uninstalled = run(f, "uninstall");
     assert.equal(uninstalled.status, 0, point + ": " + uninstalled.stderr);
-    assert(!fs.existsSync(join(f.root, "install")), point);
+    assert.deepEqual(Object.keys(tree(join(f.root, "install"))), ["update-state.json"], point);
   }
 });
 test("shared plan never grants ownership to a pre-existing unreceipted equal file", async () => {
@@ -211,7 +211,7 @@ test(
     assert.equal(uninstalled.status, 0, uninstalled.stderr);
     assert.match(uninstalled.stdout, /left .* in place; remove it yourself/);
     assert.deepEqual(fs.readFileSync(target), before);
-    assert(!fs.existsSync(join(f.root, "install")));
+    assert.deepEqual(Object.keys(tree(join(f.root, "install"))), ["update-state.json"]);
     const refused = spawnSync(target, ["version"], { env: f.env, encoding: "utf8" });
     assert.equal(refused.status, 1);
     assert.match(refused.stderr, /not installed at/);
@@ -263,6 +263,6 @@ test("install retry resumes old-generation retirement before recording an alread
     );
     r = run(f, "uninstall");
     assert.equal(r.status, 0, r.stderr);
-    assert(!fs.existsSync(root));
+    assert.deepEqual(Object.keys(tree(root)), ["update-state.json"]);
   }
 });

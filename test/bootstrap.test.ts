@@ -60,7 +60,7 @@ test("bootstrap verifies, imports and commits under its own lock; fallback conve
   assert.notEqual(r.status, 0);
   r = bootstrap(f, ["--resume-uninstall"]);
   assert.equal(r.status, 0, r.stderr);
-  assert(!fs.existsSync(join(f.root, "install")));
+  assert.deepEqual(Object.keys(tree(join(f.root, "install"))), ["update-state.json"]);
   assert.deepEqual(tree(join(f.root, "identity")), data);
 });
 test("real POSIX bootstrap with empty production anchor changes nothing", (t) => {
@@ -156,5 +156,5 @@ test("printed external anchor verifies every recovery byte before importing anyt
   fs.writeFileSync(file, originalFile);
   r = spawnSync(shell, args, { cwd: ROOT, env: f.env, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  assert(!fs.existsSync(join(f.root, "install")));
+  assert.deepEqual(Object.keys(tree(join(f.root, "install"))), ["update-state.json"]);
 });

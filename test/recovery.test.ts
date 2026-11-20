@@ -9,6 +9,7 @@ import { testKey, useTestKey, signedFixture, recoveryFixture } from "./install-f
 import { ROOT, tree } from "./support.ts";
 const key = testKey();
 useTestKey(key);
+const { encodeState } = await import("../product/src/update-state.ts");
 const { cleanupRecovery } = await import("../product/src/recovery.ts");
 test("R46-1: signed remaining PRODUCT authenticates; node/list are never read or executed", () => {
   const f = signedFixture(key, "0.5.0", true),
@@ -32,6 +33,10 @@ test("R46-1 A: co-tampered product/list, unknown product and invalid signed cont
   for (const kind of ["tamper", "unknown", "signature", "manifest", "missing-metadata"]) {
     const f = signedFixture(key, "0.5.0", true),
       folder = recoveryFixture(f);
+    fs.writeFileSync(
+      join(dirname(folder), "update-state.json"),
+      encodeState({ schema: "trajecta.update-state/v2", floor: 1, accepted: null, rotations: [] }),
+    );
     if (kind === "tamper") {
       fs.writeFileSync(join(folder, "product/src/a.ts"), "modified");
       fs.writeFileSync(join(folder, "DIGESTS.json"), JSON.stringify({ files: { "product/src/a.ts": "forged" } }));

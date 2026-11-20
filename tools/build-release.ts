@@ -12,7 +12,10 @@ export function build(
   mode: "foundation" | "release" = "foundation",
   fetch = true,
   templates = join(ROOT, "bin/templates"),
+  indexSequence?: number,
 ): Buffer {
+  if (mode === "release" && (!Number.isSafeInteger(indexSequence) || indexSequence! < 1))
+    throw new Error("release requires a positive safe index_sequence");
   checkAuthority();
   checkDispatcher();
   verifyCompat();
@@ -30,10 +33,17 @@ export function build(
   const product = Object.fromEntries(
     Object.entries(mode === "release" ? runtime : filesIn(join(ROOT, "product"))).map(([p, b]) => ["product/" + p, b]),
   );
-  const payload = { ...product, ...engineFiles(lock, fetch), ...bin, LICENSE: fs.readFileSync(join(ROOT, "LICENSE")) };
+  const payload = {
+    ...product,
+    ...engineFiles(lock, fetch),
+    ...bin,
+    LICENSE: fs.readFileSync(join(ROOT, "LICENSE")),
+    "CHANGELOG.md": fs.readFileSync(join(ROOT, "CHANGELOG.md")),
+  };
   const manifest = {
     schema: "trajecta.manifest/v1",
     artifact: mode,
+    ...(mode === "release" ? { index_sequence: indexSequence } : {}),
     version: pkg.version,
     node: pkg.engines.node,
     engines: Object.fromEntries(Object.entries(lock.engines).map(([name, pin]) => [name, pin.commit])),
@@ -71,7 +81,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const at = args.indexOf("--out");
   const pkg = JSON.parse(fs.readFileSync(join(ROOT, "product/package.json"), "utf8"));
   const out = at >= 0 ? resolve(args[at + 1]) : join(ROOT, "dist", `trajecta-${pkg.version}.tar.gz`);
-  const bytes = build(mode, !args.includes("--cached"));
+  const sequenceAt = args.indexOf("--index-sequence");
+  const bytes = build(
+    mode,
+    !args.includes("--cached"),
+    undefined,
+    sequenceAt < 0 ? undefined : Number(args[sequenceAt + 1]),
+  );
   fs.mkdirSync(dirname(out), { recursive: true });
   fs.writeFileSync(out, bytes);
   process.stdout.write(json({ path: out, ...releaseMetadata(bytes, pkg.version), artifact: mode }));

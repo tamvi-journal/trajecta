@@ -9,6 +9,9 @@ import { options, pointer, doctor, confirmation, type Options } from "./installe
 import { probeNode, handoffNode, supported } from "./node-probe.ts";
 import { requireAnchor } from "./release.ts";
 import { recoveryVerifierSource } from "./engines.ts";
+import { trustedKeys, RESET_WARNING } from "./install-state.ts";
+import { readState } from "./update-state.ts";
+import { TRUST_ANCHOR } from "./trust.ts";
 import { checkpoint } from "./checkpoint.ts";
 import { reportExternal } from "./shared-effects.ts";
 import { removeAllPlugins, reportPlugins } from "./plugin-generations.ts";
@@ -87,7 +90,7 @@ export function resumeCommand(root: string, anchor: string): string {
 }
 function recoveryAnchor(root: string, data: Ledger): string {
   const folder = join(root, ".uninstall"),
-    manifest = signedManifest(folder),
+    manifest = signedManifest(folder, trustedKeys(root)),
     files: Record<string, string> = {};
   for (const name of productPaths(manifest)) {
     const path = join(folder, name),
@@ -112,18 +115,39 @@ function recoveryAnchor(root: string, data: Ledger): string {
     throw new Error("recovery digest list mismatch");
   return digest(expected);
 }
-async function finalize(opts: Options, held: ReturnType<typeof acquire>): Promise<void> {
+async function stateDecision(root: string, yes: boolean): Promise<boolean> {
+  if (!fs.existsSync(join(root, "update-state.json"))) return false;
+  try {
+    readState(root, TRUST_ANCHOR);
+  } catch {
+    process.stdout.write("Retained invalid update-state.json; restore a valid state before resetting it.\n");
+    return false;
+  }
+  return !yes && (await confirmation(RESET_WARNING, "RESET UPDATE STATE"));
+}
+async function runStateDecision(root: string, yes: boolean): Promise<boolean> {
+  const reset = await stateDecision(root, yes);
+  checkpoint("U:update-state");
+  return reset;
+}
+async function finalize(opts: Options, held: ReturnType<typeof acquire>, reset = false): Promise<void> {
   cleanupTemps(opts.root, held);
   checkpoint("U:temps");
   cleanupClaims(opts.root, held);
   checkpoint("U:claims");
   unlink(opts.root, "owned.json");
   checkpoint("U:owned");
-  unlink(opts.root, "current");
-  checkpoint("U:current");
   const paths = cleanupRecovery(opts.root);
   if (paths.length) retained(opts.root, paths);
   checkpoint("U:recovery-cleanup");
+  checkpoint("U:state-decided");
+  if (reset) {
+    readState(opts.root, TRUST_ANCHOR);
+    unlink(opts.root, "update-state.json");
+    checkpoint("U:state-removed");
+  }
+  unlink(opts.root, "current");
+  checkpoint("U:current");
 }
 /** Verified bootstrap calls only this bounded resume entry with its own held token. */
 export async function resumeUninstallHeld(argv: string[], token: string): Promise<number> {
@@ -167,7 +191,7 @@ async function uninstallWithLock(argv: string[], inherited?: Owner): Promise<num
     if (version && (current === "uninstalling" || current?.includes(version)))
       throw new Error("cannot uninstall current or rollback-protected version");
     if (resume && !regular(join(opts.root, "owned.json"))) {
-      await finalize(opts, held);
+      await finalize(opts, held, await runStateDecision(opts.root, yes));
       completed = true;
       return 0;
     }
@@ -186,7 +210,7 @@ async function uninstallWithLock(argv: string[], inherited?: Owner): Promise<num
     else {
       if (!current || !installed.includes(current[0])) {
         if (fs.existsSync(join(opts.root, ".uninstall"))) {
-          await finalize(opts, held);
+          await finalize(opts, held, await runStateDecision(opts.root, yes));
           completed = true;
           return 0;
         }
@@ -209,19 +233,8 @@ async function uninstallWithLock(argv: string[], inherited?: Owner): Promise<num
     const shared = removeScope(opts.root, "shared", data);
     if (shared.length) retained(opts.root, shared);
     checkpoint("U:shared");
-    const state = join(opts.root, "update-state.json");
-    if (
-      fs.existsSync(state) &&
-      regular(state) &&
-      !yes &&
-      (await confirmation(
-        "Removing update-state.json resets replay protection and the key-rotation chain. Type RESET UPDATE STATE: ",
-        "RESET UPDATE STATE",
-      ))
-    )
-      unlink(opts.root, "update-state.json");
-    checkpoint("U:update-state");
-    await finalize(opts, held);
+    const reset = await runStateDecision(opts.root, yes);
+    await finalize(opts, held, reset);
     completed = true;
     process.stdout.write(
       `Data remains at ${opts.db} and ${opts.workRoot}; profiles and client configs were not touched.\n`,

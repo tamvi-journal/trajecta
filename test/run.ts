@@ -27,6 +27,11 @@ run([
 run([
   "--test",
   "--test-concurrency=1",
+  "test/update-trust.test.ts",
+  "test/update-release.test.ts",
+  "test/update-command.test.ts",
+  "test/update-fetch.test.ts",
+  "test/update-uninstall-crash.test.ts",
   "test/install-lock.test.ts",
   "test/lock-concurrency.test.ts",
   "test/release-trust.test.ts",
@@ -53,8 +58,8 @@ const tests = readdirSync(join(work, "test"))
   .filter((name) => name.endsWith(".test.ts"))
   .sort();
 run(["--import", "./test/work-gate.ts", "--test", ...tests.map((name) => join(work, "test", name))]);
-const a = build("release", false),
-  b = build("release", false);
+const a = build("release", false, undefined, 1),
+  b = build("release", false, undefined, 1);
 if (!a.equals(b)) throw new Error("two final builds differ");
 mkdirSync(join(ROOT, "dist"), { recursive: true });
 const version = JSON.parse(readFileSync(join(ROOT, "product/package.json"), "utf8")).version;

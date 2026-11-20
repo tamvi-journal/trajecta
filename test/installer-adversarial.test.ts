@@ -174,7 +174,7 @@ test("changed shared bytes stop before update-state or controls; clearing them m
   assert.deepEqual(Object.keys(tree(root)), ["update-state.json"]);
 });
 
-test("stale lock recovery then real install then full uninstall leaves an empty root", () => {
+test("stale lock recovery then real install then non-TTY uninstall keeps exactly replay state", () => {
   const f = signedFixture(testKey()),
     root = join(f.root, "install");
   fs.mkdirSync(root);
@@ -192,7 +192,7 @@ test("stale lock recovery then real install then full uninstall leaves an empty 
   assert(!fs.readdirSync(root).some((name) => name.startsWith(".lock.claim.")));
   r = run(f, "uninstall");
   assert.equal(r.status, 0, r.stderr);
-  assert(!fs.existsSync(root));
+  assert.deepEqual(Object.keys(tree(root)), ["update-state.json"]);
 });
 
 test("refusing an unowned empty root never removes that directory", () => {
