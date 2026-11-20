@@ -99,12 +99,7 @@ test("lost/corrupt state refuses install, update and check without protected-tre
     if (damaged === "directory") fs.mkdirSync(path);
     if (damaged === "symlink") {
       fs.writeFileSync(join(f.root, "target"), original);
-      try {
-        fs.symlinkSync(join(f.root, "target"), path);
-      } catch (e) {
-        if (process.platform === "win32" && ["EPERM", "EACCES"].includes((e as any).code)) continue;
-        throw e;
-      }
+      fs.symlinkSync(join(f.root, "target"), path);
     }
     const i = publish(f, 10),
       before = tree(join(f.root, "install"));
@@ -137,12 +132,7 @@ test("fresh state write crashes converge; reserved temp is cleared only under lo
     fs.mkdirSync(root);
     if (kind === "directory") fs.mkdirSync(tmp);
     else {
-      try {
-        fs.symlinkSync(join(f.root, "missing"), tmp);
-      } catch (e) {
-        if (process.platform === "win32") continue;
-        throw e;
-      }
+      fs.symlinkSync(join(f.root, "missing"), tmp);
     }
     const before = tree(root),
       r = install(f);
@@ -276,4 +266,34 @@ test("normal index acceptance persists paired sequence/digest; known rotation-be
     assert.deepEqual(tree(root), before);
     assert.equal(fs.statSync(join(root, "update-state.json"), { bigint: true }).mtimeNs, stamp);
   }
+});
+
+test("unsequenced release refuses before seeding; malformed state survives a typed uninstall", async () => {
+  const { tarball } = await import("../tools/archive.ts"),
+    { releaseMetadata } = await import("../tools/build-release.ts");
+  const f = fixture(),
+    manifest = { ...f.manifest };
+  delete (manifest as any).index_sequence;
+  const archive = tarball(
+    { ...f.payload, "MANIFEST.json": Buffer.from(JSON.stringify(manifest, null, 2) + "\n") },
+    "trajecta-0.5.0",
+  );
+  const metadata = Buffer.from(JSON.stringify(releaseMetadata(archive, "0.5.0"), null, 2) + "\n");
+  fs.writeFileSync(join(f.release, "trajecta-0.5.0.tar.gz"), archive);
+  fs.writeFileSync(join(f.release, "release.json"), metadata);
+  fs.writeFileSync(join(f.release, "release.json.sig"), key.sign(metadata));
+  const refused = install(f);
+  assert.equal(refused.status, 1);
+  assert.equal(refused.stderr, "trajecta: release has no index_sequence\n");
+  assert(!fs.existsSync(join(f.root, "install")));
+  const other = fixture();
+  assert.equal(install(other).status, 0);
+  const path = join(other.root, "install/update-state.json"),
+    bad = Buffer.concat([fs.readFileSync(path), Buffer.from("x")]);
+  fs.writeFileSync(path, bad);
+  const removed = run(other, "uninstall", [], { TEST_CONFIRM_RESET: "yes" });
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.deepEqual(Object.keys(tree(join(other.root, "install"))), ["update-state.json"]);
+  assert(fs.readFileSync(path).equals(bad));
+  assert.match(removed.stdout, /Retained invalid update-state/);
 });

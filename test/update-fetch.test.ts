@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 import https from "node:https";
+import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { canonical } from "../product/src/update-json.ts";
@@ -94,7 +95,12 @@ test("local HTTPS: valid check is pure; redirect, scheme, caps, timeout and trun
       setImmediate(() => res.destroy());
       return;
     }
-    res.end(req.url!.endsWith(".sig") ? signature : bytes);
+    const body = req.url!.endsWith(".sig") ? Buffer.from(signature) : bytes;
+    if (mode === "gzip") {
+      const zipped = gzipSync(body);
+      res.writeHead(200, { "content-encoding": "gzip", "content-length": zipped.length });
+      res.end(zipped);
+    } else res.end(body);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = "https://127.0.0.1:" + (server.address() as any).port;
@@ -116,6 +122,10 @@ test("local HTTPS: valid check is pure; redirect, scheme, caps, timeout and trun
     const before = tree(root),
       ok = await invoke();
     assert.equal(ok.status, 0, ok.stderr);
+    assert.deepEqual(tree(root), before);
+    mode = "gzip";
+    const compressed = await invoke();
+    assert.equal(compressed.status, 0, compressed.stderr);
     assert.deepEqual(tree(root), before);
     for (mode of ["host", "http", "large-header", "large-stream", "timeout", "truncated"]) {
       const result = await invoke();

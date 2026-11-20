@@ -78,3 +78,16 @@ test("canonical update values agree with the pinned R0 writer", async () => {
   );
   assert.equal(canonical(obj), expected);
 });
+
+test("BOM and invalid UTF-8 are noncanonical; authorized return rotations obey the same three rules", () => {
+  assert.throws(() => parseCanonical(Buffer.concat([Buffer.from([239, 187, 191]), Buffer.from("{}")])));
+  assert.throws(() => parseCanonical(Buffer.from([0xc0, 0xaf])));
+  const first = { schema: "trajecta.rotation/v1", from: a.anchor, to: b.anchor, sequence: 10 };
+  const second = { schema: "trajecta.rotation/v1", from: b.anchor, to: a.anchor, sequence: 10 };
+  const rotations = [
+    { ...first, signature: a.sign(Buffer.from(canonical(first))).trim() },
+    { ...second, signature: b.sign(Buffer.from(canonical(second))).trim() },
+  ];
+  const i = index(10, rotations);
+  assert.equal(decideIndex(i.bytes, i.signature, initial(), a.anchor).keys.at(-1), a.anchor);
+});

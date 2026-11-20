@@ -26,7 +26,7 @@ export async function fetchUpdateFile(path: string, cap: number, from?: string):
   }
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   let url = new URL(UPDATE_BASE.replace(/\/$/u, "") + "/" + path);
-  for (let hops = 0; hops < 11; hops++) {
+  for (let hops = 0; ; hops++) {
     if (
       url.protocol !== "https:" ||
       url.username ||
@@ -63,18 +63,18 @@ export async function fetchUpdateFile(path: string, cap: number, from?: string):
         chunks.push(value);
       }
       // Fetch detects truncation too; the explicit length law also covers local fixtures.
-      if (length !== null && size !== Number(length)) throw new Error("truncated update file");
+      if (length !== null && !response.headers.get("content-encoding") && size !== Number(length))
+        throw new Error("truncated update file");
       return Buffer.concat(chunks);
     } finally {
       await reader.cancel().catch(() => {});
     }
   }
-  throw new Error("too many update redirects");
 }
 export async function fetchIndex(from?: string): Promise<{ bytes: Buffer; signature: string }> {
   const bytes = await fetchUpdateFile("latest/download/index.json", 1024 * 1024, from);
   const signature = await fetchUpdateFile("latest/download/index.json.sig", 64 * 1024, from);
-  return { bytes, signature: new TextDecoder("utf-8", { fatal: true }).decode(signature) };
+  return { bytes, signature: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(signature) };
 }
 
 /** Fetch exact index-pinned metadata; only the verified chain can authorize its signer. */
@@ -88,7 +88,11 @@ export async function fetchReleaseMetadata(
   const bytes = await fetchUpdateFile("download/v" + version + "/release.json", 64 * 1024, from);
   if (digest(bytes) !== expectedDigest) throw new Error("index/release digest mismatch");
   const signature = await fetchUpdateFile("download/v" + version + "/release.json.sig", 64 * 1024, from);
-  const metadata = verifyMetadata(bytes, new TextDecoder("utf-8", { fatal: true }).decode(signature), keys);
+  const metadata = verifyMetadata(
+    bytes,
+    new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(signature),
+    keys,
+  );
   if (metadata.version !== version || metadata.size > 256 * 1024 * 1024)
     throw new Error("update release size/version refused");
   return { bytes, metadata };

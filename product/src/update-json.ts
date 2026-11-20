@@ -33,7 +33,7 @@ export function canonical(value: any): string {
   throw new Error("invalid update JSON value");
 }
 export function parseCanonical(bytes: Buffer): any {
-  const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  const source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   let offset = 0;
   function fail(): never {
     throw new Error("invalid canonical update JSON");

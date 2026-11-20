@@ -193,13 +193,10 @@ async function main() {
     }
     for(const name of fs.readdirSync(root)) if(/^\\.staging-[0-9]/u.test(name)){const abandoned=join(root,name);safeRoot(abandoned);fs.rmSync(abandoned,{recursive:true})}
     const raw=fs.readFileSync(join(releaseDir,'release.json'));
-    const text=fs.readFileSync(join(releaseDir,'release.json.sig'),'utf8').replace(/\\n$/u,'');
-    const signature=Buffer.from(text,'base64');
-    if(signature.length!==64 || signature.toString('base64')!==text) throw Error('invalid signature');
-    const key=createPublicKey({key:Buffer.from(TRUST_ANCHOR,'base64'),format:'der',type:'spki'});
-    if(key.asymmetricKeyType!=='ed25519' || !verify(null,raw,key,signature)) throw Error('release signature mismatch');
-    const metadata=JSON.parse(raw.toString());
-    if(!/^\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.-]+)?$/u.test(metadata.version)) throw Error('invalid release version');
+    const text=fs.readFileSync(join(releaseDir,'release.json.sig'),'utf8');
+    let metadata;
+    try {metadata=verifyMetadata(raw,text,resume ? trustedKeys(root) : [TRUST_ANCHOR]);}
+    catch(error) {if(resume) versionTrustFailure(root,error);throw error;}
     const archive=fs.readFileSync(join(releaseDir,'trajecta-'+metadata.version+'.tar.gz'));
     if(archive.length!==metadata.size || digest(archive)!==metadata.sha256) throw Error('release size/SHA-256 mismatch');
     const extractor=fs.readFileSync(join(releaseDir,'trajecta-extract.mjs'));

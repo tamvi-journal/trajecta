@@ -45,6 +45,16 @@ function setup(rotated: boolean) {
     f = signedFixture(signer),
     r = installing(f);
   assert.equal(r.status, 0, r.stderr);
+  if (!rotated)
+    fs.writeFileSync(
+      join(f.root, "install/update-state.json"),
+      encodeState({
+        schema: "trajecta.update-state/v2",
+        floor: 10,
+        accepted: null,
+        rotations: [],
+      }),
+    );
   if (rotated) {
     const body = { schema: "trajecta.rotation/v1", from: k0.anchor, to: k1.anchor, sequence: 1 };
     const rotation = { ...body, signature: k0.sign(Buffer.from(canonical(body))).trim() };
@@ -111,24 +121,41 @@ for (const rotated of [false, true])
             assert(fs.readFileSync(join(root, "update-state.json")).equals(stateBefore!));
           }
         } else if (beforeRemoval.includes(point)) {
-          const retry = invoke(f, "uninstall", ["--resume"]);
+          const retry = invoke(f, "uninstall", ["--resume"], confirm ? {} : { TEST_CONFIRM_RESET: "yes" });
           assert.equal(retry.status, 0, point + ": " + retry.stderr);
-          assert(fs.existsSync(join(root, "update-state.json")), point);
+          assert.equal(fs.existsSync(join(root, "update-state.json")), confirm, point);
         } else {
           // After current unlink there is no sentinel-based implicit consent.
           assert(!fs.existsSync(join(root, "current")), point);
+          const candidate = rotated ? signedFixture(k0) : f;
+          const retried = invoke(f, "install", [
+            "--release",
+            candidate.release,
+            "--db",
+            join(f.root, "identity/example.sqlite3"),
+            "--work-root",
+            join(f.root, "work"),
+            "--no-user-bin",
+          ]);
+          assert.equal(retried.status, 0, retried.stderr);
+          assert.equal(
+            decodeState(fs.readFileSync(join(root, "update-state.json")), k0.anchor).floor,
+            confirm ? 1 : 10,
+            point,
+          );
         }
       }
     });
   }
 test("post-E missing state, byte guard and unexpected marker refuse with protected data intact", () => {
-  for (const foreign of ["none", "update-state.reset", "extra"]) {
+  for (const foreign of ["none", "update-state.reset", "extra", "bad-sentinel"]) {
     const f = setup(false),
       root = join(f.root, "install");
     const killed = invoke(f, "uninstall", [], { TEST_KILL_AT: "U:state-decided" });
     assert.notEqual(killed.status, 0);
     fs.unlinkSync(join(root, "update-state.json"));
-    if (foreign !== "none") fs.writeFileSync(join(root, foreign), "");
+    if (foreign === "bad-sentinel") fs.writeFileSync(join(root, "current"), "uninstalling\r\n");
+    else if (foreign !== "none") fs.writeFileSync(join(root, foreign), "");
     const before = tree(root),
       r = installing(f);
     assert.equal(r.status, 1, r.stderr);
@@ -139,5 +166,48 @@ test("post-E missing state, byte guard and unexpected marker refuse with protect
     for (const name of Object.keys(after).filter((n) => n.startsWith(".lock.claim."))) delete after[name];
     assert.deepEqual(after, before);
     assert(!fs.existsSync(join(root, "update-state.json")));
+  }
+});
+
+test("K1 bootstrap fallback uses persisted chain before cleanup; losing state refuses before extraction", async () => {
+  const { bootstrapSource } = await import("../tools/bootstrap-build.ts");
+  for (const missing of [false, true]) {
+    const f = setup(true),
+      root = join(f.root, "install");
+    const killed = invoke(f, "uninstall", [], { TEST_KILL_AT: "U:owned", TEST_CONFIRM_RESET: "yes" });
+    assert.notEqual(killed.status, 0);
+    if (missing) fs.unlinkSync(join(root, "update-state.json"));
+    const before = tree(join(root, ".uninstall"));
+    const url =
+      "data:text/javascript;base64," + Buffer.from(bootstrapSource()).toString("base64") + "#trajecta-bootstrap";
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        "--input-type=module",
+        "-e",
+        "await import(process.env.TEST_BOOTSTRAP_URL)",
+        "--",
+        "--resume-uninstall",
+        "--root",
+        root,
+        "--release",
+        f.release,
+      ],
+      {
+        env: { ...f.env, TEST_BOOTSTRAP_URL: url },
+        encoding: "utf8",
+      },
+    );
+    if (missing) {
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /needs --reset-state/);
+      assert.deepEqual(tree(join(root, ".uninstall")), before);
+      assert(!fs.readdirSync(root).some((name) => name.startsWith(".staging-")));
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(Object.keys(tree(root)), ["update-state.json"]);
+      assert.equal(decodeState(fs.readFileSync(join(root, "update-state.json")), k0.anchor).rotations.length, 1);
+    }
   }
 });

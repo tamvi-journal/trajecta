@@ -60,7 +60,6 @@ function walkRotations(rotations: Rotation[], anchor: string, ceiling: number): 
       statement.from !== keys.at(-1) ||
       statement.sequence < previous ||
       statement.sequence > ceiling ||
-      keys.includes(statement.to) ||
       !signatureMatches(Buffer.from(canonical(body)), signature, statement.from)
     )
       throw new Error("invalid rotation chain");
