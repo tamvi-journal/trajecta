@@ -99,7 +99,7 @@ test("real Windows bootstrap with empty production anchor changes nothing", (t) 
     encoding: "utf8",
   });
   assert.equal(control.status, 0, control.stderr);
-  assert.deepEqual(Object.keys(tree(join(f.root, "install"))), ["update-state.json"]);
+  assert(!fs.existsSync(join(f.root, "install")));
   const before = tree(f.root),
     r = spawnSync(
       "powershell.exe",
